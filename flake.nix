@@ -18,13 +18,17 @@
         defaultPackage = naersk-lib.buildPackage {
           src = ./.;
           doCheck = true;
-          pname = "sixty-two";
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          # buildInputs = with pkgs; [
-          # ];
-          # postInstall = ''
-          #   wrapProgram "$out/bin/sixty-two" --prefix LD_LIBRARY_PATH : "${libPath}"
-          # '';
+          pname = "colmena-health";
+          nativeBuildInputs = with pkgs; [
+            makeWrapper
+            pkg-config
+          ];
+          buildInputs = with pkgs; [
+            openssl
+          ];
+          postInstall = ''
+            wrapProgram "$out/bin/colmena-health" --prefix LD_LIBRARY_PATH : "${libPath}"
+          '';
         };
 
         defaultApp = utils.lib.mkApp {
@@ -43,6 +47,7 @@
             rustPackages.clippy
             rustc
             rustfmt
+            openssh
 
             openssl
           ];
