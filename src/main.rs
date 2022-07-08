@@ -38,9 +38,12 @@ impl CheckResult {
         self
     }
 
-    fn err(&mut self, message: String) -> String {
+    fn err<S, E>(&mut self, message: S, error: E) -> String
+    where
+        S: Into<String>,
+        E: std::error::Error {
         self.failure = true;
-        self.log.push_str(&message);
+        self.log.push_str(&format!("{}: {}", message.into(), error.to_string()));
         format!("{}", self)
     }
 }
@@ -85,13 +88,14 @@ impl HealthCheck {
 		        let client = reqwest::ClientBuilder::new()
                     .timeout(Duration::new(5, 0))
                     .build()
-                    .map_err(|err| result.err(format!("Unable to construct http client: {}", err.to_string())))?;
+                    .map_err(|err| result.err("Unable to construct http client", err))?;
 
-		        let response = client.get(url).send().await.map_err(|err| result.err(err.to_string()))?;
+		        let response = client.get(url).send().await
+                    .map_err(|err| result.err("Error making HTTP request", err))?;
 
                 if !response.status().is_success() {
                     let error = response.text().await
-                        .map_err(|err| result.err(format!("Unable to read result: {}", err.to_string())))?;
+                        .map_err(|err| result.err("Unable to read result", err))?;
 
                     return result.fail(error).into();
                 }
@@ -102,7 +106,7 @@ impl HealthCheck {
                 let mut result = CheckResult::new(format!("domain '{}' for '{}'", domain, hostname));
 
 		        let resolver = TokioAsyncResolver::tokio_from_system_conf()
-                    .map_err(|err| result.err(format!("Unable to construct resolver: {}", err.to_string())))?;
+                    .map_err(|err| result.err("Unable to construct resolver", err))?;
 
                 if let Err(error) = resolver.lookup_ip(domain).await {
                     result.log.push_str(&error.to_string());
@@ -122,10 +126,10 @@ impl HealthCheck {
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
-                    .map_err(|err| result.err(format!("Unable to spawn ssh command: {}", err.to_string())))?;
+                    .map_err(|err| result.err("Unable to spawn ssh command", err))?;
 
                 let output = ssh.output().await
-                    .map_err(|err| result.err(format!("Failed to get output from command: {}", err.to_string())))?;
+                    .map_err(|err| result.err("Failed to get output from command", err))?;
 
                 if !output.status.success() {
                     result.failure = true;
