@@ -31,6 +31,20 @@ impl CheckResult {
     }
 }
 
+impl CheckResult {
+    fn fail(mut self, message: String) -> CheckResult {
+        self.failure = true;
+        self.log.push_str(&message);
+        self
+    }
+
+    fn err(&mut self, message: String) -> String {
+        self.failure = true;
+        self.log.push_str(&message);
+        format!("{}", self)
+    }
+}
+
 impl Display for CheckResult {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(f, "Checking {}: ", self.description)?;
@@ -43,12 +57,13 @@ impl Display for CheckResult {
     }
 }
 
-impl From<CheckResult> for Result<String, String> {
-    fn from(result: CheckResult) -> Result<String, String> {
-        if result.failure {
-            Err(format!("Checking {}: Failure:\n{}", result.description, result.log))
+impl Into<Result<String, String>> for CheckResult {
+    fn into(self) -> Result<String, String> {
+        let output = format!("{}", self);
+        if self.failure {
+            Err(output)
         } else {
-            Ok(format!("Checking {}: Success!", result.description))
+            Ok(output)
         }
     }
 }
@@ -61,60 +76,40 @@ enum HealthCheck {
 }
 
 impl HealthCheck {
-    async fn do_check(&self, hostname: String) -> CheckResult {
+    async fn do_check(&self, hostname: String) -> Result<String, String> {
 	    match self {
 	        HealthCheck::Http { url } => {
                 let mut result = CheckResult::new(format!("url '{}' for '{}'", url, hostname));
 
-		        let client = match reqwest::ClientBuilder::new()
+		        let client = reqwest::ClientBuilder::new()
                     .timeout(Duration::new(3, 0))
-                    .build() {
-                    Ok(res) => res,
-                    Err(err) => {
-                        result.log.push_str(&format!("Unable to construct http client: {}", err.to_string()));
-                        result.failure = true;
-                        return result;
-                    }
-                };
-		        let response = match client.get(url).send().await {
-                    Ok(resp) => resp,
-                    Err(error) => {
-                        result.log.push_str(&error.to_string());
-                        result.failure = true;
-                        return result;
-                    }
-                };
+                    .build()
+                    .map_err(|err| result.err(format!("Unable to construct http client: {}", err.to_string())))?;
+
+		        let response = client.get(url).send().await.map_err(|err| result.err(err.to_string()))?;
 
                 if !response.status().is_success() {
-                    let error = match response.text().await {
-                        Ok(body) => body,
-                        Err(text) => format!("Unable to read result: {}", text),
-                    };
+                    let error = response.text().await
+                        .map_err(|err| result.err(format!("Unable to read result: {}", err.to_string())))?;
 
-                    result.log.push_str(&error);
-                    result.failure = true;
-                    return result;
+                    return result.fail(error).into();
                 }
 
-                return result;
+                return result.into();
 	        }
 	        HealthCheck::Dns { domain } => {
                 let mut result = CheckResult::new(format!("domain '{}' for '{}'", domain, hostname));
 
-		        let resolver = match TokioAsyncResolver::tokio_from_system_conf() {
-                    Ok(res) => res,
-                    Err(err) => {
-                        result.log.push_str(&format!("Unable to construct resolver: {}", err.to_string()));
-                        result.failure = true;
-                        return result;
-                    }
-                };
+		        let resolver = TokioAsyncResolver::tokio_from_system_conf()
+                    .map_err(|err| result.err(format!("Unable to construct resolver: {}", err.to_string())))?;
+
                 if let Err(error) = resolver.lookup_ip(domain).await {
                     result.log.push_str(&error.to_string());
                     result.failure = true;
                 }
 
-                return result;
+                return result.into();
+            }
             }
         }
     }
@@ -201,11 +196,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let failures = rt.block_on(async {
         let mut failures = 0;
         while let Some(result) = checks.next().await {
-            let result = result;
-            if result.failure {
-                failures += 1;
+            match result {
+                Ok(log) => print!("{}\n", log),
+                Err(log) => {
+                    failures += 1;
+                    print!("{}\n", log);
+                }
             }
-            print!("{}\n", result);
         }
         failures
     });
