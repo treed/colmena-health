@@ -41,9 +41,11 @@ impl CheckResult {
     fn err<S, E>(&mut self, message: S, error: E) -> String
     where
         S: Into<String>,
-        E: std::error::Error {
+        E: std::error::Error,
+    {
         self.failure = true;
-        self.log.push_str(&format!("{}: {}", message.into(), error.to_string()));
+        self.log
+            .push_str(&format!("{}: {}", message.into(), error.to_string()));
         format!("{}", self)
     }
 }
@@ -72,7 +74,7 @@ impl Into<Result<String, String>> for CheckResult {
 }
 
 #[derive(Deserialize, Debug)]
-#[serde(tag = "type", rename_all="lowercase")]
+#[serde(tag = "type", rename_all = "lowercase")]
 enum HealthCheck {
     Http { url: String },
     Dns { domain: String },
@@ -81,31 +83,37 @@ enum HealthCheck {
 
 impl HealthCheck {
     async fn do_check(&self, hostname: String) -> Result<String, String> {
-	    match self {
-	        HealthCheck::Http { url } => {
+        match self {
+            HealthCheck::Http { url } => {
                 let mut result = CheckResult::new(format!("url '{}' for '{}'", url, hostname));
 
-		        let client = reqwest::ClientBuilder::new()
+                let client = reqwest::ClientBuilder::new()
                     .timeout(Duration::new(5, 0))
                     .build()
                     .map_err(|err| result.err("Unable to construct http client", err))?;
 
-		        let response = client.get(url).send().await
+                let response = client
+                    .get(url)
+                    .send()
+                    .await
                     .map_err(|err| result.err("Error making HTTP request", err))?;
 
                 if !response.status().is_success() {
-                    let error = response.text().await
+                    let error = response
+                        .text()
+                        .await
                         .map_err(|err| result.err("Unable to read result", err))?;
 
                     return result.fail(error).into();
                 }
 
                 return result.into();
-	        }
-	        HealthCheck::Dns { domain } => {
-                let mut result = CheckResult::new(format!("domain '{}' for '{}'", domain, hostname));
+            }
+            HealthCheck::Dns { domain } => {
+                let mut result =
+                    CheckResult::new(format!("domain '{}' for '{}'", domain, hostname));
 
-		        let resolver = TokioAsyncResolver::tokio_from_system_conf()
+                let resolver = TokioAsyncResolver::tokio_from_system_conf()
                     .map_err(|err| result.err("Unable to construct resolver", err))?;
 
                 if let Err(error) = resolver.lookup_ip(domain).await {
@@ -116,7 +124,10 @@ impl HealthCheck {
                 return result.into();
             }
             HealthCheck::Ssh { command } => {
-                let mut result = CheckResult::new(format!("via ssh to {} with command '{}'", hostname, command));
+                let mut result = CheckResult::new(format!(
+                    "via ssh to {} with command '{}'",
+                    hostname, command
+                ));
 
                 let ssh = Command::new("ssh")
                     .arg(hostname)
@@ -128,7 +139,9 @@ impl HealthCheck {
                     .spawn()
                     .map_err(|err| result.err("Unable to spawn ssh command", err))?;
 
-                let output = ssh.output().await
+                let output = ssh
+                    .output()
+                    .await
                     .map_err(|err| result.err("Failed to get output from command", err))?;
 
                 if !output.status.success() {
@@ -137,13 +150,19 @@ impl HealthCheck {
                         Some(exit_code) => exit_code.to_string(),
                         None => "'none'".to_string(),
                     };
-                    result.log.push_str(&format!("Command returned exit code {}\n", code));
+                    result
+                        .log
+                        .push_str(&format!("Command returned exit code {}\n", code));
                 }
 
                 result.log.push_str("Stdout:\n");
-                result.log.push_str(&String::from_utf8_lossy(&output.stdout));
+                result
+                    .log
+                    .push_str(&String::from_utf8_lossy(&output.stdout));
                 result.log.push_str("Stderr:\n");
-                result.log.push_str(&String::from_utf8_lossy(&output.stderr));
+                result
+                    .log
+                    .push_str(&String::from_utf8_lossy(&output.stderr));
 
                 return result.into();
             }
@@ -179,20 +198,28 @@ struct ChecksFailedError {
 impl Error for ChecksFailedError {}
 impl Debug for ChecksFailedError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        let (plural, verb) = if self.number == 1 { ("", "was") } else { ("s", "were") };
+        let (plural, verb) = if self.number == 1 {
+            ("", "was")
+        } else {
+            ("s", "were")
+        };
         write!(f, "There {} {} failed check{}", verb, self.number, plural)
     }
 }
 impl Display for ChecksFailedError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        let (plural, verb) = if self.number == 1 { ("", "was") } else { ("s", "were") };
+        let (plural, verb) = if self.number == 1 {
+            ("", "was")
+        } else {
+            ("s", "were")
+        };
         write!(f, "There {} {} failed check{}", verb, self.number, plural)
     }
 }
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[clap(long="on")]
+    #[clap(long = "on")]
     targets: Option<Vec<String>>,
     config_file: String,
 }
@@ -208,14 +235,15 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     } else {
         fs::read_to_string(args.config_file)?
     };
-	let config: Config = serde_json::from_str(&config_data)?;
+    let config: Config = serde_json::from_str(&config_data)?;
 
     let mut checks = FuturesUnordered::new();
 
     if let Some(targets) = args.targets {
         for target in targets.iter() {
-            let target_cfg = config.targets.get(target)
-                .ok_or(UnknownTargetError{target: target.clone()})?;
+            let target_cfg = config.targets.get(target).ok_or(UnknownTargetError {
+                target: target.clone(),
+            })?;
 
             for check in target_cfg.iter() {
                 checks.push(check.do_check(target.clone()));
@@ -244,7 +272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     });
 
     if failures > 0 {
-        return Err(Box::new(ChecksFailedError{ number: failures }))
+        return Err(Box::new(ChecksFailedError { number: failures }));
     }
     Ok(())
 }
