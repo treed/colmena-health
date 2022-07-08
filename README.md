@@ -76,15 +76,27 @@ DNS checks simply determine if a domain resolves at all. This will likely mostly
 
 There is currently only the single `domain` parameter.
 
+### SSH
+
+SSH checks will ssh to the target machine (by that name), and run a command, failing unless ssh successfully connects and the remote command exits 0.
+
+```json
+{ "type": "ssh", "command": "true" }
+```
+
+The single parameter `command` is the command to pass to the ssh client.
+
+This implementation shells out to your `ssh` command for the simplicity in having full access to the user's own ssh config and agent.
+
 ## TODO
 
 ### More Check Types
 
-At the very least I want to do an ssh type. I'm debating using [Thrush](https://docs.rs/thrussh/latest/thrussh/) or just shelling out.
+Possibly something that will query Prometheus or Loki compatible endpoints?
 
 ### Better Check Retry/Timeout Control
 
-Right now there's only one attempt. HTTP requests have a five second timeout, and DNS has no timeout at all.
+Right now there's only one attempt. HTTP requests have a five second timeout, and the other two have no timeout at all.
 
 I want all checks to have ways to control:
 

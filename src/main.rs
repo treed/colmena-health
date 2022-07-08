@@ -7,8 +7,8 @@ use std::fs;
 use std::io::{stdin, Read};
 use std::time::Duration;
 
+use async_process::{Command, Stdio};
 use clap::Parser;
-
 use reqwest;
 use serde::Deserialize;
 use serde_json;
@@ -73,6 +73,7 @@ impl Into<Result<String, String>> for CheckResult {
 enum HealthCheck {
     Http { url: String },
     Dns { domain: String },
+    Ssh { command: String },
 }
 
 impl HealthCheck {
@@ -110,6 +111,37 @@ impl HealthCheck {
 
                 return result.into();
             }
+            HealthCheck::Ssh { command } => {
+                let mut result = CheckResult::new(format!("via ssh to {} with command '{}'", hostname, command));
+
+                let ssh = Command::new("ssh")
+                    .arg(hostname)
+                    .arg(command)
+                    .kill_on_drop(true)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .map_err(|err| result.err(format!("Unable to spawn ssh command: {}", err.to_string())))?;
+
+                let output = ssh.output().await
+                    .map_err(|err| result.err(format!("Failed to get output from command: {}", err.to_string())))?;
+
+                if !output.status.success() {
+                    result.failure = true;
+                    let code = match output.status.code() {
+                        Some(exit_code) => exit_code.to_string(),
+                        None => "'none'".to_string(),
+                    };
+                    result.log.push_str(&format!("Command returned exit code {}\n", code));
+                }
+
+                result.log.push_str("Stdout:\n");
+                result.log.push_str(&String::from_utf8_lossy(&output.stdout));
+                result.log.push_str("Stderr:\n");
+                result.log.push_str(&String::from_utf8_lossy(&output.stderr));
+
+                return result.into();
             }
         }
     }
