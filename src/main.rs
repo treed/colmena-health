@@ -44,8 +44,7 @@ impl CheckResult {
         E: std::error::Error,
     {
         self.failure = true;
-        self.log
-            .push_str(&format!("{}: {}", message.into(), error.to_string()));
+        self.log.push_str(&format!("{}: {}", message.into(), error.to_string()));
         format!("{}", self)
     }
 }
@@ -110,8 +109,7 @@ impl HealthCheck {
                 return result.into();
             }
             HealthCheck::Dns { domain } => {
-                let mut result =
-                    CheckResult::new(format!("domain '{}' for '{}'", domain, hostname));
+                let mut result = CheckResult::new(format!("domain '{}' for '{}'", domain, hostname));
 
                 let resolver = TokioAsyncResolver::tokio_from_system_conf()
                     .map_err(|err| result.err("Unable to construct resolver", err))?;
@@ -124,10 +122,7 @@ impl HealthCheck {
                 return result.into();
             }
             HealthCheck::Ssh { command } => {
-                let mut result = CheckResult::new(format!(
-                    "via ssh to {} with command '{}'",
-                    hostname, command
-                ));
+                let mut result = CheckResult::new(format!("via ssh to {} with command '{}'", hostname, command));
 
                 let ssh = Command::new("ssh")
                     .arg(hostname)
@@ -150,19 +145,13 @@ impl HealthCheck {
                         Some(exit_code) => exit_code.to_string(),
                         None => "'none'".to_string(),
                     };
-                    result
-                        .log
-                        .push_str(&format!("Command returned exit code {}\n", code));
+                    result.log.push_str(&format!("Command returned exit code {}\n", code));
                 }
 
                 result.log.push_str("Stdout:\n");
-                result
-                    .log
-                    .push_str(&String::from_utf8_lossy(&output.stdout));
+                result.log.push_str(&String::from_utf8_lossy(&output.stdout));
                 result.log.push_str("Stderr:\n");
-                result
-                    .log
-                    .push_str(&String::from_utf8_lossy(&output.stderr));
+                result.log.push_str(&String::from_utf8_lossy(&output.stderr));
 
                 return result.into();
             }
@@ -198,21 +187,13 @@ struct ChecksFailedError {
 impl Error for ChecksFailedError {}
 impl Debug for ChecksFailedError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        let (plural, verb) = if self.number == 1 {
-            ("", "was")
-        } else {
-            ("s", "were")
-        };
+        let (plural, verb) = if self.number == 1 { ("", "was") } else { ("s", "were") };
         write!(f, "There {} {} failed check{}", verb, self.number, plural)
     }
 }
 impl Display for ChecksFailedError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        let (plural, verb) = if self.number == 1 {
-            ("", "was")
-        } else {
-            ("s", "were")
-        };
+        let (plural, verb) = if self.number == 1 { ("", "was") } else { ("s", "were") };
         write!(f, "There {} {} failed check{}", verb, self.number, plural)
     }
 }
@@ -241,9 +222,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     if let Some(targets) = args.targets {
         for target in targets.iter() {
-            let target_cfg = config.targets.get(target).ok_or(UnknownTargetError {
-                target: target.clone(),
-            })?;
+            let target_cfg = config
+                .targets
+                .get(target)
+                .ok_or(UnknownTargetError { target: target.clone() })?;
 
             for check in target_cfg.iter() {
                 checks.push(check.do_check(target.clone()));
