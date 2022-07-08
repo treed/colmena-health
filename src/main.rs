@@ -83,7 +83,7 @@ impl HealthCheck {
                 let mut result = CheckResult::new(format!("url '{}' for '{}'", url, hostname));
 
 		        let client = reqwest::ClientBuilder::new()
-                    .timeout(Duration::new(3, 0))
+                    .timeout(Duration::new(5, 0))
                     .build()
                     .map_err(|err| result.err(format!("Unable to construct http client: {}", err.to_string())))?;
 
