@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use async_process::{Command, Stdio};
 use clap::Parser;
-use eyre::{eyre, Result};
+use simple_eyre::eyre::{eyre, Result};
 use reqwest;
 use serde::Deserialize;
 use serde_json;
@@ -172,6 +172,8 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    simple_eyre::install()?;
+
     let args = Args::parse();
     let rt = tokio::runtime::Runtime::new().unwrap();
 
