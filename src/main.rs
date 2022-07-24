@@ -1,7 +1,6 @@
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs;
 use std::io::{stdin, Read};
@@ -9,6 +8,7 @@ use std::time::Duration;
 
 use async_process::{Command, Stdio};
 use clap::Parser;
+use eyre::{eyre, Result};
 use reqwest;
 use serde::Deserialize;
 use serde_json;
@@ -164,40 +164,6 @@ struct Config {
     targets: HashMap<String, Vec<HealthCheck>>,
 }
 
-struct UnknownTargetError {
-    target: String,
-}
-
-impl Error for UnknownTargetError {}
-impl Debug for UnknownTargetError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "Unknown target: {}", self.target)
-    }
-}
-impl Display for UnknownTargetError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "Unknown target: {}", self.target)
-    }
-}
-
-struct ChecksFailedError {
-    number: usize,
-}
-
-impl Error for ChecksFailedError {}
-impl Debug for ChecksFailedError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        let (plural, verb) = if self.number == 1 { ("", "was") } else { ("s", "were") };
-        write!(f, "There {} {} failed check{}", verb, self.number, plural)
-    }
-}
-impl Display for ChecksFailedError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        let (plural, verb) = if self.number == 1 { ("", "was") } else { ("s", "were") };
-        write!(f, "There {} {} failed check{}", verb, self.number, plural)
-    }
-}
-
 #[derive(Parser, Debug)]
 struct Args {
     #[clap(long = "on")]
@@ -205,7 +171,7 @@ struct Args {
     config_file: String,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
+fn main() -> Result<()> {
     let args = Args::parse();
     let rt = tokio::runtime::Runtime::new().unwrap();
 
@@ -222,10 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     if let Some(targets) = args.targets {
         for target in targets.iter() {
-            let target_cfg = config
-                .targets
-                .get(target)
-                .ok_or(UnknownTargetError { target: target.clone() })?;
+            let target_cfg = config.targets.get(target).ok_or(eyre!("Unknown target: {}", target))?;
 
             for check in target_cfg.iter() {
                 checks.push(check.do_check(target.clone()));
@@ -254,7 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     });
 
     if failures > 0 {
-        return Err(Box::new(ChecksFailedError { number: failures }));
+        return Err(eyre!("{} check(s) failed", failures));
     }
     Ok(())
 }
