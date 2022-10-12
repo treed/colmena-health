@@ -50,6 +50,9 @@
             openssh
 
             openssl
+          ] ++ lib.optionals pkgs.stdenv.isDarwin [
+            libiconv
+            darwin.apple_sdk.frameworks.Security
           ];
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
           LD_LIBRARY_PATH = libPath;
