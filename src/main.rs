@@ -14,7 +14,7 @@ use reqwest;
 use serde::Deserialize;
 use serde_json;
 use simple_eyre::eyre::{eyre, Result, WrapErr};
-use tokio::time::{sleep, timeout};
+use tokio::time::{sleep, timeout as tokio_timeout};
 use trust_dns_resolver::TokioAsyncResolver;
 
 struct RetryPolicy {
@@ -199,12 +199,6 @@ impl Checker for DnsChecker {
     }
 }
 
-struct CheckConfig {
-    checker: Box<dyn Checker>,
-    policy: RetryPolicy,
-    timeout: Duration,
-}
-
 enum CheckStatus {
     Running,
     Waiting(String),
@@ -298,29 +292,29 @@ impl CheckResult {
     }
 }
 
-async fn run_check(mut cfg: CheckConfig, updates: Sender<CheckUpdate>) -> CheckResult {
-    let mut retrier = Retrier::new(cfg.policy);
+async fn run_check(mut checker: Box<dyn Checker>, policy: RetryPolicy, timeout: Duration, updates: Sender<CheckUpdate>) -> CheckResult {
+    let mut retrier = Retrier::new(policy);
 
     loop {
-        send_update(&updates, &cfg.checker, CheckStatus::Running);
+        send_update(&updates, &checker, CheckStatus::Running);
 
-        match timeout(cfg.timeout, cfg.checker.check())
+        match tokio_timeout(timeout, checker.check())
             .await
             .wrap_err("Check timed out")
         {
             Ok(Ok(_)) => {
-                send_update(&updates, &cfg.checker, CheckStatus::Succeeded);
+                send_update(&updates, &checker, CheckStatus::Succeeded);
                 return CheckResult::Success;
             }
             Err(err) | Ok(Err(err)) => {
-                send_update(&updates, &cfg.checker, CheckStatus::Waiting(err.to_string()));
+                send_update(&updates, &checker, CheckStatus::Waiting(err.to_string()));
             }
         }
 
         if retrier.retry().await.is_none() {
             send_update(
                 &updates,
-                &cfg.checker,
+                &checker,
                 CheckStatus::Failed("Maximum retries reached".to_owned()),
             );
             return CheckResult::Failure;
@@ -387,15 +381,13 @@ fn main() -> Result<()> {
                 let checker = make_checker(target.clone(), (*check_def).clone(), tx.clone())
                     .wrap_err("Failed to instantiate check")?;
                 let check = run_check(
-                    CheckConfig {
-                        checker,
-                        policy: RetryPolicy {
-                            max_retries: 3,
-                            initial: Duration::from_secs(1),
-                            multiplier: 1.1,
-                        },
-                        timeout: Duration::from_secs(10),
+                    checker,
+                    RetryPolicy {
+                        max_retries: 3,
+                        initial: Duration::from_secs(1),
+                        multiplier: 1.1,
                     },
+                    Duration::from_secs(10),
                     tx.clone(),
                 );
 
@@ -408,15 +400,13 @@ fn main() -> Result<()> {
                 let checker = make_checker(target.clone(), (*check_def).clone(), tx.clone())
                     .wrap_err("Failed to instantiate check")?;
                 let check = run_check(
-                    CheckConfig {
-                        checker,
-                        policy: RetryPolicy {
-                            max_retries: 3,
-                            initial: Duration::from_secs(1),
-                            multiplier: 1.1,
-                        },
-                        timeout: Duration::from_secs(10),
+                    checker,
+                    RetryPolicy {
+                        max_retries: 3,
+                        initial: Duration::from_secs(1),
+                        multiplier: 1.1,
                     },
+                    Duration::from_secs(10),
                     tx.clone(),
                 );
 
