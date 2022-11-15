@@ -15,7 +15,7 @@
         ];
       in
       {
-        defaultPackage = naersk-lib.buildPackage {
+        packages.default = naersk-lib.buildPackage {
           src = ./.;
           doCheck = true;
           pname = "colmena-health";
@@ -31,11 +31,11 @@
           '';
         };
 
-        defaultApp = utils.lib.mkApp {
-          drv = self.defaultPackage."${system}";
+        apps.default = utils.lib.mkApp {
+          drv = self.packages.${system}.default;
         };
 
-        devShell = with pkgs; mkShell {
+        devShells.default = with pkgs; mkShell {
           nativeBuildInputs = [
             pkg-config
           ];
