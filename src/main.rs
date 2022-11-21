@@ -1,3 +1,4 @@
+use config::CheckConfig;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::{self, Debug, Display};
@@ -6,247 +7,21 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use std::{fs, future};
 
-use async_process::{Command, Stdio};
 use async_trait::async_trait;
 use clap::Parser;
-use merge::Merge;
-use reqwest;
-use serde::Deserialize;
-use serde_json;
-use simple_eyre::eyre::{eyre, Error as EyreError, Result, WrapErr};
-use tokio::time::{sleep, timeout as tokio_timeout};
-use trust_dns_resolver::TokioAsyncResolver;
+use simple_eyre::eyre::{eyre, Result, WrapErr};
+use tokio::time::timeout as tokio_timeout;
 
-#[derive(Clone, Deserialize, Debug, Merge)]
-struct OptionalRetryPolicy {
-    max_retries: Option<u16>,
-    initial: Option<f64>,
-    multiplier: Option<f64>,
-}
-
-impl Default for OptionalRetryPolicy {
-    fn default() -> Self {
-        OptionalRetryPolicy {
-            max_retries: Some(3),
-            initial: Some(1.0),
-            multiplier: Some(1.1),
-        }
-    }
-}
-
-#[derive(Clone, Deserialize, Debug)]
-struct RetryPolicy {
-    max_retries: u16,
-    initial: Duration,
-    multiplier: f64,
-}
-
-impl TryFrom<OptionalRetryPolicy> for RetryPolicy {
-    type Error = EyreError;
-
-    fn try_from(policy: OptionalRetryPolicy) -> Result<RetryPolicy> {
-        // could use .ok_or, but it's unstable
-        // https://github.com/rust-lang/rust/issues/91930
-        let max_retries = match policy.max_retries {
-            Some(max_retries) => max_retries,
-            None => return Err(eyre!("'max_retries' is a required field for ssh checks")),
-        };
-
-        let initial = match policy.initial {
-            Some(initial) => Duration::from_secs_f64(initial),
-            None => return Err(eyre!("'initial' is a required field for ssh checks")),
-        };
-
-        let multiplier = match policy.multiplier {
-            Some(multiplier) => multiplier,
-            None => return Err(eyre!("'multiplier' is a required field for ssh checks")),
-        };
-
-        Ok(RetryPolicy {
-            max_retries,
-            initial,
-            multiplier,
-        })
-    }
-}
-
-struct Retrier {
-    policy: RetryPolicy,
-    last: Option<Duration>,
-    attempts: u16,
-}
-
-impl Retrier {
-    fn new(policy: RetryPolicy) -> Self {
-        Retrier {
-            policy,
-            last: None,
-            attempts: 0,
-        }
-    }
-
-    async fn retry(&mut self) -> Option<u16> {
-        if self.attempts >= self.policy.max_retries {
-            return None;
-        }
-
-        let dur = match self.last {
-            None => self.policy.initial,
-            Some(last_dur) => last_dur.mul_f64(self.policy.multiplier),
-        };
-
-        sleep(dur).await;
-
-        self.last = Some(dur);
-        self.attempts += 1;
-
-        Some(self.attempts)
-    }
-}
+mod config;
+mod dns;
+mod http;
+mod retry;
+mod ssh;
 
 #[async_trait]
-trait Checker {
+pub trait Checker {
     fn id(&self) -> String;
     async fn check(&mut self) -> Result<()>;
-}
-
-struct SshChecker {
-    config: SshConfig,
-    debug: Sender<CheckUpdate>,
-    ssh: Command,
-}
-
-impl SshChecker {
-    fn new(config: SshConfig, debug: Sender<CheckUpdate>) -> Box<dyn Checker> {
-        let mut ssh = Command::new("ssh");
-
-        ssh.arg(config.hostname.clone());
-
-        if let Some(ref user) = config.user {
-            ssh.arg(format!("-l{}", user));
-        }
-
-        ssh.arg(config.command.clone())
-            .kill_on_drop(true)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        Box::new(SshChecker {
-            config,
-            debug: debug.clone(),
-            ssh,
-        })
-    }
-}
-
-#[async_trait]
-impl Checker for SshChecker {
-    fn id(&self) -> String {
-        format!("ssh '{}': {}", self.config.hostname, self.config.command)
-    }
-
-    async fn check(&mut self) -> Result<()> {
-        let ssh_cmd = self.ssh.spawn().wrap_err("Unable to spawn ssh command")?;
-
-        let output = ssh_cmd.output().await.wrap_err("Failed to get output from command")?;
-
-        let mut log = String::new();
-        log.push_str("Stdout:\n");
-        log.push_str(&String::from_utf8_lossy(&output.stdout));
-        log.push_str("Stderr:\n");
-        log.push_str(&String::from_utf8_lossy(&output.stderr));
-
-        if !output.status.success() {
-            let code = match output.status.code() {
-                Some(exit_code) => exit_code.to_string(),
-                None => "'none'".to_string(),
-            };
-            return Err(eyre!("Command returned exit code {}\n{}", code, log));
-        }
-
-        send_debug(&self.debug, self.id().to_owned(), log);
-
-        return Ok(());
-    }
-}
-
-struct HttpChecker {
-    config: HttpConfig,
-    client: reqwest::Client,
-    debug: Sender<CheckUpdate>,
-}
-
-impl HttpChecker {
-    fn new(config: HttpConfig, debug: Sender<CheckUpdate>) -> Result<Box<dyn Checker>> {
-        let client = reqwest::ClientBuilder::new()
-            .timeout(Duration::new(5, 0))
-            .build()
-            .wrap_err("Unable to construct http client")?;
-
-        Ok(Box::new(HttpChecker { config, client, debug }))
-    }
-}
-
-#[async_trait]
-impl Checker for HttpChecker {
-    fn id(&self) -> String {
-        format!("http {}", self.config.url)
-    }
-
-    async fn check(&mut self) -> Result<()> {
-        send_debug(&self.debug, self.id().to_owned(), "making request".to_owned());
-        let response = self
-            .client
-            .get(self.config.url.clone())
-            .send()
-            .await
-            .wrap_err("Error making HTTP request")?;
-
-        let status = response.status();
-        send_debug(
-            &self.debug,
-            self.id().to_owned(),
-            format!("response status: {:?}", status),
-        );
-
-        if !status.is_success() {
-            let error = response
-                .text()
-                .await
-                .wrap_err(format!("Received HTTP error '{}' and unable to read body", status))?;
-
-            return Err(eyre!(error.to_string()));
-        }
-
-        return Ok(());
-    }
-}
-
-struct DnsChecker {
-    config: DnsConfig,
-    resolver: TokioAsyncResolver,
-}
-
-impl DnsChecker {
-    fn new(config: DnsConfig) -> Result<Box<dyn Checker>> {
-        let resolver = TokioAsyncResolver::tokio_from_system_conf().wrap_err("Unable to construct resolver")?;
-
-        Ok(Box::new(DnsChecker { config, resolver }))
-    }
-}
-
-#[async_trait]
-impl Checker for DnsChecker {
-    fn id(&self) -> String {
-        format!("dns '{}'", self.config.domain)
-    }
-
-    async fn check(&mut self) -> Result<()> {
-        self.resolver.lookup_ip(self.config.domain.clone()).await?;
-
-        Ok(())
-    }
 }
 
 enum CheckStatus {
@@ -281,7 +56,7 @@ impl Display for CheckMessage {
     }
 }
 
-struct CheckUpdate {
+pub struct CheckUpdate {
     id: String,
     msg: CheckMessage,
 }
@@ -344,11 +119,11 @@ impl CheckResult {
 
 async fn run_check(
     mut checker: Box<dyn Checker>,
-    policy: RetryPolicy,
+    policy: retry::Policy,
     timeout: Duration,
     updates: Sender<CheckUpdate>,
 ) -> CheckResult {
-    let mut retrier = Retrier::new(policy);
+    let mut retrier = retry::Retrier::new(policy);
 
     loop {
         send_update(&updates, &checker, CheckStatus::Running);
@@ -376,191 +151,11 @@ async fn run_check(
         }
     }
 }
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(tag = "type", rename_all = "lowercase")]
-enum HealthCheck {
-    Http { url: String },
-    Dns { domain: String },
-    Ssh { command: String },
-}
-
-#[derive(Deserialize, Debug)]
-struct CheckDefinition {
-    retry_policy: Option<OptionalRetryPolicy>,
-
-    #[serde(flatten)]
-    config: CheckConfig,
-}
-
-#[derive(Clone, Deserialize, Debug)]
-#[serde(tag = "type", content = "params", rename_all = "lowercase")]
-enum CheckConfig {
-    Http(OptionalHttpConfig),
-    Dns(OptionalDnsConfig),
-    Ssh(OptionalSshConfig),
-}
-
-#[derive(Clone, Deserialize, Debug, Merge)]
-struct OptionalSshConfig {
-    command: Option<String>,
-    hostname: Option<String>,
-    user: Option<String>,
-}
-
-impl Default for OptionalSshConfig {
-    fn default() -> Self {
-        OptionalSshConfig {
-            command: None,
-            hostname: None,
-            user: Some("root".to_owned()),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct SshConfig {
-    command: String,
-    hostname: String,
-    user: Option<String>,
-}
-
-impl TryFrom<OptionalSshConfig> for SshConfig {
-    type Error = EyreError;
-
-    fn try_from(cfg: OptionalSshConfig) -> Result<SshConfig> {
-        // could use .ok_or, but it's unstable
-        // https://github.com/rust-lang/rust/issues/91930
-        let command = match cfg.command {
-            Some(command) => command,
-            None => return Err(eyre!("'command' is a required field for ssh checks")),
-        };
-
-        let hostname = match cfg.hostname {
-            Some(hostname) => hostname,
-            None => return Err(eyre!("'hostname' is a required field for ssh checks")),
-        };
-
-        Ok(SshConfig {
-            command,
-            hostname,
-            user: cfg.user,
-        })
-    }
-}
-
-#[derive(Clone, Deserialize, Debug, Merge)]
-struct OptionalDnsConfig {
-    domain: Option<String>,
-    // TODO add record type, possibly expected result
-}
-
-impl Default for OptionalDnsConfig {
-    fn default() -> Self {
-        OptionalDnsConfig { domain: None }
-    }
-}
-
-#[derive(Debug)]
-struct DnsConfig {
-    domain: String,
-}
-
-impl TryFrom<OptionalDnsConfig> for DnsConfig {
-    type Error = EyreError;
-
-    fn try_from(cfg: OptionalDnsConfig) -> Result<DnsConfig> {
-        // could use .ok_or, but it's unstable
-        // https://github.com/rust-lang/rust/issues/91930
-        let domain = match cfg.domain {
-            Some(domain) => domain,
-            None => return Err(eyre!("'domain' is a required field for dns checks")),
-        };
-
-        Ok(DnsConfig { domain })
-    }
-}
-
-#[derive(Clone, Deserialize, Debug, Merge)]
-struct OptionalHttpConfig {
-    url: Option<String>,
-    // TODO expected status codes
-}
-
-impl Default for OptionalHttpConfig {
-    fn default() -> Self {
-        OptionalHttpConfig { url: None }
-    }
-}
-
-#[derive(Debug)]
-struct HttpConfig {
-    url: String,
-}
-
-impl TryFrom<OptionalHttpConfig> for HttpConfig {
-    type Error = EyreError;
-
-    fn try_from(cfg: OptionalHttpConfig) -> Result<HttpConfig> {
-        // could use .ok_or, but it's unstable
-        // https://github.com/rust-lang/rust/issues/91930
-        let url = match cfg.url {
-            Some(url) => url,
-            None => return Err(eyre!("'url' is a required field for http checks")),
-        };
-
-        Ok(HttpConfig { url })
-    }
-}
-
-#[derive(Deserialize, Debug, Default, Merge)]
-struct ConfigDefaults {
-    ssh: Option<OptionalSshConfig>,
-    dns: Option<OptionalDnsConfig>,
-    http: Option<OptionalHttpConfig>,
-    retry_policy: Option<OptionalRetryPolicy>,
-}
-
-#[derive(Deserialize, Debug)]
-struct Config {
-    defaults: Option<ConfigDefaults>,
-    checks: Vec<CheckDefinition>,
-}
-
 #[derive(Parser, Debug)]
 struct Args {
     #[clap(long = "on")]
     targets: Option<Vec<String>>,
     config_file: String,
-}
-
-fn merge_configs<T>(global: Option<T>, mut check: T) -> T
-where
-    T: Merge + Default,
-{
-    if let Some(mut g) = global {
-        g.merge(T::default());
-        check.merge(g);
-    } else {
-        check.merge(T::default());
-    }
-
-    check
-}
-
-fn prepare_config<T, F>(global: Option<T>, mut check: T) -> Result<F>
-where
-    T: Merge + Default,
-    F: TryFrom<T, Error = EyreError>,
-{
-    if let Some(mut g) = global {
-        g.merge(T::default());
-        check.merge(g);
-    } else {
-        check.merge(T::default());
-    }
-
-    F::try_from(check)
 }
 
 fn main() -> Result<()> {
@@ -580,7 +175,7 @@ fn main() -> Result<()> {
     } else {
         fs::read_to_string(args.config_file)?
     };
-    let config: Config = serde_json::from_str(&config_data)?;
+    let config: config::Config = serde_json::from_str(&config_data)?;
     let config_defaults = config.defaults.unwrap_or_default();
 
     let checks = FuturesUnordered::new();
@@ -589,19 +184,21 @@ fn main() -> Result<()> {
     for check_def in config.checks.into_iter() {
         let checker = match check_def.config {
             CheckConfig::Http(http_config) => {
-                HttpChecker::new(prepare_config(config_defaults.http.clone(), http_config)?, tx.clone())?
+                http::Checker::new(config::prepare(config_defaults.http.clone(), http_config)?, tx.clone())?
             }
-            CheckConfig::Dns(dns_config) => DnsChecker::new(prepare_config(config_defaults.dns.clone(), dns_config)?)?,
+            CheckConfig::Dns(dns_config) => {
+                dns::Checker::new(config::prepare(config_defaults.dns.clone(), dns_config)?)?
+            }
             CheckConfig::Ssh(ssh_config) => {
-                SshChecker::new(prepare_config(config_defaults.ssh.clone(), ssh_config)?, tx.clone())
+                ssh::Checker::new(config::prepare(config_defaults.ssh.clone(), ssh_config)?, tx.clone())
             }
         };
         let check = run_check(
             checker,
-            RetryPolicy::try_from(merge_configs(
+            (retry::Policy::try_from(config::merge(
                 config_defaults.retry_policy.clone(),
                 check_def.retry_policy.clone().unwrap_or_default(),
-            ))?,
+            )))?,
             Duration::from_secs(10),
             tx.clone(),
         );
