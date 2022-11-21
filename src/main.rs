@@ -120,8 +120,13 @@ impl SshChecker {
     fn new(config: SshConfig, debug: Sender<CheckUpdate>) -> Box<dyn Checker> {
         let mut ssh = Command::new("ssh");
 
-        ssh.arg(config.hostname.clone())
-            .arg(config.command.clone())
+        ssh.arg(config.hostname.clone());
+
+        if let Some(ref user) = config.user {
+            ssh.arg(format!("-l{}", user));
+        }
+
+        ssh.arg(config.command.clone())
             .kill_on_drop(true)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -400,6 +405,7 @@ enum CheckConfig {
 struct OptionalSshConfig {
     command: Option<String>,
     hostname: Option<String>,
+    user: Option<String>,
 }
 
 impl Default for OptionalSshConfig {
@@ -407,6 +413,7 @@ impl Default for OptionalSshConfig {
         OptionalSshConfig {
             command: None,
             hostname: None,
+            user: Some("root".to_owned()),
         }
     }
 }
@@ -415,6 +422,7 @@ impl Default for OptionalSshConfig {
 struct SshConfig {
     command: String,
     hostname: String,
+    user: Option<String>,
 }
 
 impl TryFrom<OptionalSshConfig> for SshConfig {
@@ -436,6 +444,7 @@ impl TryFrom<OptionalSshConfig> for SshConfig {
         Ok(SshConfig {
             command,
             hostname,
+            user: cfg.user,
         })
     }
 }
