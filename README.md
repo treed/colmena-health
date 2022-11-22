@@ -6,14 +6,13 @@ It is not intended to live very long, and exists only as a proof of concept for 
 
 The interface will probably change a fair bit as I determine how everything should work.
 
-If this works out, my intention is to try to see this merged into Colmena itself.
+If this works out, my intention is to try to see this merged into Colmena itself, although as written it could technically work with any deployment tool, or even without one.
 
 ## Current State
 
-As is, it is capable of two types of checks, which can be driven from a json config that can be gathered through `colmena eval`.
+As is, it is capable of three types of checks, which can be driven from a json config that can be gathered through `colmena eval`.
 
 I added the following to my common module, to ensure that different modules could specify checks for the same host.
-
 
 ```nix
   options = {
@@ -38,72 +37,161 @@ I can then add definitions like the following to one of my modules:
 
 Which can then be run like this:
 
-```sh
-colmena eval -E '{ nodes, lib, ... }: { targets = lib.attrsets.mapAttrs (k: v: v.config.deployment.healthchecks) nodes; }' | colmena-health --on svc-host1 -
+I currently have this in my flake to generate a list of healthchecks from that data:
+
+```nix
+      checks = let
+        lib = nixpkgs.lib;
+        removeKey = key: set: lib.attrsets.filterAttrs (n: v: n != key) set;
+        mkCheck = hostname: def: {
+          type = def.type;
+          labels = {inherit hostname;};
+          params =
+            removeKey "type" def
+            // (
+              if def.type == "ssh"
+              then {inherit hostname;}
+              else {}
+            );
+        };
+      in {
+        checks = lib.lists.flatten (lib.attrsets.mapAttrsToList (n: v: builtins.map (mkCheck n) v.config.deployment.healthchecks) self.colmenaHive.nodes);
+      };
 ```
 
-Which can give you output like the following:
+It's a little complicated, but I intend to add a module and lib functions to this tool's flake to make it a bit simpler on the user's side.
+
+This can give you output like the following:
 
 ```
-[INFO ] Using configuration: /home/user/ops/cluster/hive.nix
-Checking domain my-service.service.consul.' for 'svc-host1': Success
-Checking url 'http://svc-host1.dc1.example.com:5050' for 'svc-host1': Success
-Checking url 'http://svc-host1.dc1.example.com:5000' for 'svc-host1': Failed:
-error sending request for url (http://svc-host1.dc1.example.com:5000/login/?redirect=%2F%3F): connection closed before message completed
-Checking url 'https://my-service.example.com' for 'svc-host1': Success
-Error: There was 1 failed check
+[ssh 'svc-host1': systemctl is-active nginx] status update: Running
+[http http://svc-host1.dc1.example.com:5050] status update: Running
+[ssh 'svc-host1': systemctl is-active consul] status update: Running
+[http http://svc-host1.dc1.example.com:5000] status update: Running
+[http http://svc-host1.dc1.example.com:5050] status update: Succeeded
+[ssh 'svc-host1': systemctl is-active consul] status update: Succeeded
+[ssh 'svc-host1': systemctl is-active nginx] status update: Succeeded
+[http http://svc-host1.dc1.example.com:5000] status update: Waiting after failure: Check timed out
+[http http://svc-host1.dc1.example.com:5000] status update: Waiting after failure: Check timed out
+[http http://svc-host1.dc1.example.com:5000] status update: Failed: Check timed out
+1 check(s) failed
 ```
 
-### HTTP
+(In the future, this will likely be what verbose output looks like, and most of it will be hidden by default.)
+
+## Configuration
+
+The configuration file is JSON, with two top level keys: "checks" and "defaults".
+
+Checks is a flat list of check definitions, each one with a full configuration for a specific check, given as an object.
+
+The keys for a check definition are:
+
+- type: The type of the check (`dns`, `http`, `ssh`)
+- params: An object of parameters to pass to the check
+- retry_policy: An object configuring how retries are handled
+- labels: An object of arbitrary key/value data representing the check; this is used for selecting checks at run-time
+- check_timeout: A number of seconds before each check iteration times out (defaults to 10)
+
+The "defaults" key holds an object where the keys are either one of the check types, or retry_policy, and set the defaults for parameters not specified in the checks.
+
+### HTTP Checks
 
 HTTP checks will attempt to connect to a URL, and succeed if it is able to connect and the server responds with a successful status code.
 
-```json
-{ "type": "http", "url": "http://github.com/treed/colmena-health" }
-```
-
 It currently only has the one parameter, which is the URL to try.
 
-There is a hardcoded timeout at five seconds.
+```json
+{
+  "type": "http",
+  "params": {
+    "url": "http://github.com/treed/colmena-health"
+  }
+}
+```
 
 ### DNS
 
 DNS checks simply determine if a domain resolves at all. This will likely mostly be useful for DNS interfaces to service discovery, like Consul.
 
+There is currently only the single `domain` parameter.
+
 ```json
-{ "type": "dns", "domain": "my-service.service.consul" }
+{
+  "type": "dns",
+  "params": {
+    "domain": "my-service.service.consul"
+  }
+}
 ```
 
-There is currently only the single `domain` parameter.
 
 ### SSH
 
-SSH checks will ssh to the target machine (by that name), and run a command, failing unless ssh successfully connects and the remote command exits 0.
+SSH checks will ssh to the target machine and run a command, failing unless ssh successfully connects and the remote command exits 0.
 
 ```json
-{ "type": "ssh", "command": "true" }
+{
+  "type": "ssh",
+  "params": {
+    "command": "true",
+	"hostname": "rack215-cl15",
+	"username": "monitoring"
+  }
+}
 ```
 
-The single parameter `command` is the command to pass to the ssh client.
+It has three parameters:
+
+- command (required): the command to run on the target
+- hostname (required): the hostname of the target
+- username (optional): the username to connect as
+
+In the absence of a globally-set default, `username` defaults to `root`, in keeping with colmena`s default.
 
 This implementation shells out to your `ssh` command for the simplicity in having full access to the user's own ssh config and agent.
 
+Something perhaps worth calling out here is that the contents of commands won't necessarily be deployed to nodes without you doing it out-of-band. One way to handle this would be to use `pkgs.writeScript` to make a script-based package and ensure that's added to the system environment, and then use it as the command, which should have the correct store path after deployment.
+
+### Retry Policy
+
+A retry policy governs the use of retries during the check, and has three keys:
+
+- max_retries (default 3): The number of retries before failing the check (set to 0 to disable retries entirely)
+- initial (default 1): The number of seconds to wait before retrying
+- multiplier (default 1.1): A multiplier to apply to the wait duration on each retry; applies exponential backoff
+
+### Defaults
+
+As mentioned above, the top level `defaults` key holds globally applied defaults for any check parameters not specified, or for unspecified retry_policy keys.
+
+For check-type keys, the values are the same as the set of parameters for the check type.
+
+For `retry_policy`, it's the same as a retry policy as you'd define in a check.
+
+These can be used to override built-in defaults given above.
+
 ## TODO
+
+### Flake Helpers
+
+I want to add a module and lib functions to help generate the config file from within node configuration.
+
+### More Check Configuration
+
+Some check types could probably benefit from having more configuration (e.g. DNS record type and expected response, or HTTP expected status codes).
+
+### Alert Configuration
+
+I want to try having a long-running daemon mode that runs these checks at intervals, and sends failing checks to an alertmanager API for routing and delivery. (This is part of the reason for adding labels to check definitions.)
+
+### Better Output
+
+Right now, the output is purposefully very verbose. At some point, I want to default to a cleaner output mode that just shows a count of checks that are waiting, succeeded, or failed, and outputs more information for failures.
 
 ### More Check Types
 
 Possibly something that will query Prometheus or Loki compatible endpoints?
-
-### Better Check Retry/Timeout Control
-
-Right now there's only one attempt. HTTP requests have a five second timeout, and the other two have no timeout at all.
-
-I want all checks to have ways to control:
-
-- number of retries
-- retry interval (possibly with support for exponential backoff)
-- initial delay
-- per-attempt timeout
 
 ### Check Dependencies
 
