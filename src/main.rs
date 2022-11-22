@@ -220,3 +220,9 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn verify_cli() {
+    use clap::CommandFactory;
+    Args::command().debug_assert();
+}
