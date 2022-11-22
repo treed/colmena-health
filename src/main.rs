@@ -195,10 +195,10 @@ fn main() -> Result<()> {
         };
         let check = run_check(
             checker,
-            (retry::Policy::try_from(config::merge(
+            config::prepare(
                 config_defaults.retry_policy.clone(),
-                check_def.retry_policy.clone().unwrap_or_default(),
-            )))?,
+                check_def.retry_policy.unwrap_or_else(retry::OptionalPolicy::new_empty),
+            )?,
             Duration::from_secs(10),
             tx.clone(),
         );

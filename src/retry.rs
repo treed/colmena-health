@@ -22,6 +22,16 @@ impl Default for OptionalPolicy {
     }
 }
 
+impl OptionalPolicy {
+    pub fn new_empty() -> OptionalPolicy {
+        OptionalPolicy {
+            max_retries: None,
+            initial: None,
+            multiplier: None,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Debug)]
 pub struct Policy {
     max_retries: u16,

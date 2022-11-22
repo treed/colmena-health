@@ -34,20 +34,6 @@ pub struct Config {
     pub checks: Vec<CheckDefinition>,
 }
 
-pub fn merge<T>(global: Option<T>, mut check: T) -> T
-where
-    T: Merge + Default,
-{
-    if let Some(mut g) = global {
-        g.merge(T::default());
-        check.merge(g);
-    } else {
-        check.merge(T::default());
-    }
-
-    check
-}
-
 pub fn prepare<T, F>(global: Option<T>, mut check: T) -> Result<F>
 where
     T: Merge + Default,
