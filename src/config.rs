@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use merge::Merge;
 use serde::Deserialize;
 use simple_eyre::eyre::{Error as EyreError, Result};
@@ -8,6 +10,7 @@ use crate::{dns, http, retry, ssh};
 pub struct CheckDefinition {
     pub retry_policy: Option<retry::OptionalPolicy>,
     pub check_timeout: Option<f64>,
+    pub labels: Option<HashMap<String, String>>,
 
     #[serde(flatten)]
     pub config: CheckConfig,

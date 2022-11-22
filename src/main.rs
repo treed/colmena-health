@@ -1,6 +1,3 @@
-use config::CheckConfig;
-use futures::stream::futures_unordered::FuturesUnordered;
-use futures::StreamExt;
 use std::fmt::{self, Debug, Display};
 use std::io::{stdin, Read};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -9,13 +6,18 @@ use std::{fs, future};
 
 use async_trait::async_trait;
 use clap::Parser;
+use futures::stream::futures_unordered::FuturesUnordered;
+use futures::StreamExt;
 use simple_eyre::eyre::{eyre, Result, WrapErr};
 use tokio::time::timeout as tokio_timeout;
+
+use config::CheckConfig;
 
 mod config;
 mod dns;
 mod http;
 mod retry;
+mod select;
 mod ssh;
 
 #[async_trait]
@@ -153,8 +155,8 @@ async fn run_check(
 }
 #[derive(Parser, Debug)]
 struct Args {
-    #[clap(long = "on")]
-    targets: Option<Vec<String>>,
+    #[clap(long = "select")]
+    select: Option<String>,
     config_file: String,
 }
 
@@ -167,6 +169,11 @@ fn main() -> Result<()> {
         .enable_io()
         .worker_threads(4)
         .build()?;
+
+    let label_selector: Option<select::Term> = match args.select {
+        Some(sel) => Some(sel.parse()?),
+        None => None,
+    };
 
     let config_data = if args.config_file == "-" {
         let mut buf = String::new();
@@ -182,6 +189,16 @@ fn main() -> Result<()> {
     let (tx, rx) = channel::<CheckUpdate>();
 
     for check_def in config.checks.into_iter() {
+        if let Some(ref sel) = label_selector {
+            if let Some(labels) = check_def.labels {
+                if !sel.matches(&labels) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+
         let checker = match check_def.config {
             CheckConfig::Http(http_config) => {
                 http::Checker::new(config::prepare(config_defaults.http.clone(), http_config)?, tx.clone())?
