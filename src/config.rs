@@ -7,6 +7,7 @@ use crate::{dns, http, retry, ssh};
 #[derive(Deserialize, Debug)]
 pub struct CheckDefinition {
     pub retry_policy: Option<retry::OptionalPolicy>,
+    pub check_timeout: Option<f64>,
 
     #[serde(flatten)]
     pub config: CheckConfig,

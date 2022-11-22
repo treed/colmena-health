@@ -199,7 +199,7 @@ fn main() -> Result<()> {
                 config_defaults.retry_policy.clone(),
                 check_def.retry_policy.unwrap_or_else(retry::OptionalPolicy::new_empty),
             )?,
-            Duration::from_secs(10),
+            Duration::from_secs_f64(check_def.check_timeout.unwrap_or(10.0)),
             tx.clone(),
         );
 

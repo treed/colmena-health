@@ -1,5 +1,4 @@
 use std::sync::mpsc::Sender;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use merge::Merge;
@@ -50,7 +49,6 @@ pub struct Checker {
 impl Checker {
     pub fn new(config: Config, debug: Sender<CheckUpdate>) -> Result<Box<dyn CheckerTrait>> {
         let client = reqwest::ClientBuilder::new()
-            .timeout(Duration::new(5, 0))
             .build()
             .wrap_err("Unable to construct http client")?;
 
