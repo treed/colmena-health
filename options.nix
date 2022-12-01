@@ -1,4 +1,4 @@
-{ lib, ... }: {
+{ lib, config, ... }: {
   options = with lib; let
     # adapted from https://gist.github.com/GrafBlutwurst/2d6156321d6b89cb21a1d0702f5d853e
     addTag = typeTag: module: let
