@@ -161,8 +161,10 @@ async fn run_check(
 }
 #[derive(Parser, Debug)]
 struct Args {
+    /// A label-based query selector, e.g. hostname:web-1,web-2
     #[clap(short, long)]
     select: Option<String>,
+    /// The configuration file containing check definitions
     config_file: String,
 }
 
