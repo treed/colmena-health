@@ -10,58 +10,20 @@ If this works out, my intention is to try to see this merged into Colmena itself
 
 ## Current State
 
-As is, it is capable of three types of checks, which can be driven from a json config that can be gathered through `colmena eval`.
+As is, it is capable of three types of checks, which can be driven from a json config.
 
-I added the following to my common module, to ensure that different modules could specify checks for the same host.
-
-```nix
-  options = {
-    deployment.healthchecks = lib.mkOption {
-      type = with lib.types; listOf anything;
-      default = [];
-    };
-  };
-```
-
-I can then add definitions like the following to one of my modules:
-
+I can add definitions like the following to one of my modules:
 
 ```nix
     deployment.healthchecks = [
-      { type = "http"; url = "http://${config.networking.hostName}.dc1.example.com:5050"; }
-      { type = "http"; url = "http://${config.networking.hostName}.dc1.example.com:${toString config.services.my-service.port}"; }
-      { type = "dns"; domain = "my-service.service.consul."; }
-      { type = "http"; url = "https://my-service.example.com"; }
+      { type = "http"; params.url = "http://${config.networking.hostName}.dc1.example.com:5050"; }
+      { type = "http"; params.url = "http://${config.networking.hostName}.dc1.example.com:${toString config.services.my-service.port}"; }
+      { type = "dns"; params.domain = "my-service.service.consul."; }
+      { type = "http"; params.url = "https://my-service.example.com"; }
     ];
 ```
 
-Which can then be run like this:
-
-I currently have this in my flake to generate a list of healthchecks from that data:
-
-```nix
-      checks = let
-        lib = nixpkgs.lib;
-        removeKey = key: set: lib.attrsets.filterAttrs (n: v: n != key) set;
-        mkCheck = hostname: def: {
-          type = def.type;
-          labels = {inherit hostname;};
-          params =
-            removeKey "type" def
-            // (
-              if def.type == "ssh"
-              then {inherit hostname;}
-              else {}
-            );
-        };
-      in {
-        checks = lib.lists.flatten (lib.attrsets.mapAttrsToList (n: v: builtins.map (mkCheck n) v.config.deployment.healthchecks) self.colmenaHive.nodes);
-      };
-```
-
-It's a little complicated, but I intend to add a module and lib functions to this tool's flake to make it a bit simpler on the user's side.
-
-This can give you output like the following:
+When given to `colmena-health`, this can give you output like the following:
 
 ```
 [ssh 'svc-host1': systemctl is-active nginx] status update: Running
