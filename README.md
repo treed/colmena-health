@@ -79,6 +79,81 @@ This can give you output like the following:
 
 (In the future, this will likely be what verbose output looks like, and most of it will be hidden by default.)
 
+## Use From Flakes
+
+`colmena-health` can be used in a flake to define and run healthchecks within a deployment configuration. As far as I know, none of this necessarily requires `colmena` and *should* work with any deployment method that can use flakes.
+
+### Flake Input
+
+You'll need to add `colmena-health` as an input to your flake:
+
+```nix
+    colmena-health = {
+      url = "github:treed/colmena-health";
+      inputs.nixpkgs.follows = "nixpkgs"; # not strictly necessary, but would re-use your existing nixpkgs input
+    };
+```
+
+### Module
+
+In order to define healthchecks, you'll need to add the options module to your `nixosConfigurations` as a module. It would look something like this:
+
+```nix
+          nixpkgs.lib.nixosSystem {
+            inherit system;
+            extraModules = [
+              colmena.nixosModules.deploymentOptions
+            ];
+            modules =
+               [
+                colmena-health.nixosModules.healthcheckOptions
+                myNodeConfig
+              ];
+          };
+```
+
+Having done this, you can define healthchecks in your config under `deployment.healthchecks`, a list of checks using the schema described below in Configuration, as if they were part of the `checks` top level key. (`defaults` is defined elsewhere)
+
+### App
+
+Once you've defined at least one check, you'll want to actually wire up the healthcheck app. This takes place in two parts: Compiling the configuration, and defining the app. These will use functions exposed via `colmena-health`'s `lib` output.
+
+Compiling the configuration uses `colmena-health.lib.mkChecks`, a function that takes:
+
+* A list of functions that run per-check in order to mutate them; you'll see an example in a moment.
+* An attrset of nixos configurations, either a `colmena` hive via `colmena.lib.makeHive`, or possibly just straight `nixosConfigurations`. I haven't verified that the latter works, but it Should™.
+
+In order to avoid having to repetitiously add common labels, the first argument is a list of modifiers. These are functions that take:
+
+* A hostname
+* A node configuration
+* A check definition
+
+And returns a (possibly modified) check definition.
+
+There is one modifier provided, which is `colmena-health.lib.injectHostname`, which adds a `hostname` label to every check, with the value being the appropriate hostname. Thus you can run commands like `colmena-health --select hostname:my-node1,my-mynode2`.
+
+This does not need to be in a `flake-utils` `eachSystem`-like body.
+
+```nix
+      healthcheckConfig = with colmena-health.lib; {
+        checks = mkChecks [injectHostname] self.colmenaHive.nodes;
+      };
+
+```
+
+You'll notice that the check definitions are the value of a `checks` key, which is one of the top-level configuration keys mentioned below. This is also where you'd specify `defaults` if you have need to do so.
+
+Having defined the configuration, you could evaluate it as `nix eval --json .#healthcheckConfig` to get a JSON-formatted config that can be passed to `colmena-health`, or you can define an app that will pass it directly when run.
+
+```nix
+      apps.healthcheck = colmena-health.lib.mkApp system self.healthcheckConfig;
+```
+
+This, as an app, *does* need to be defined per-`system`, and thus is a candidate for use with `eachSystem`.
+
+Having added this app, you can run a full healthcheck with `nix run .#healthcheck`. Or you can pass a filter option by asking `nix run` to pass the arguments through with `--`: `nix run .#healthcheck --select hostname:/^web-svc.*/`
+
 ## Configuration
 
 The configuration file is JSON, with two top level keys: "checks" and "defaults".
@@ -89,11 +164,11 @@ The keys for a check definition are:
 
 - type: The type of the check (`dns`, `http`, `ssh`)
 - params: An object of parameters to pass to the check
-- retry_policy: An object configuring how retries are handled
+- retryPolicy: An object configuring how retries are handled
 - labels: An object of arbitrary key/value data representing the check; this is used for selecting checks at run-time
-- check_timeout: A number of seconds before each check iteration times out (defaults to 10)
+- checkTimeout: A number of seconds before each check iteration times out (defaults to 10)
 
-The "defaults" key holds an object where the keys are either one of the check types, or retry_policy, and set the defaults for parameters not specified in the checks.
+The "defaults" key holds an object where the keys are either one of the check types, or retryPolicy, and set the defaults for parameters not specified in the checks.
 
 ### HTTP Checks
 
@@ -144,7 +219,7 @@ SSH checks will ssh to the target machine and run a command, failing unless ssh 
 It has three parameters:
 
 - command (required): the command to run on the target
-- hostname (required): the hostname of the target
+- hostname (required): the hostname of the target (if you use the provided options module, this defaults to `config.networking.hostName`)
 - username (optional): the username to connect as
 
 In the absence of a globally-set default, `username` defaults to `root`, in keeping with colmena`s default.
@@ -157,25 +232,21 @@ Something perhaps worth calling out here is that the contents of commands won't 
 
 A retry policy governs the use of retries during the check, and has three keys:
 
-- max_retries (default 3): The number of retries before failing the check (set to 0 to disable retries entirely)
+- maxRetries (default 3): The number of retries before failing the check (set to 0 to disable retries entirely)
 - initial (default 1): The number of seconds to wait before retrying
 - multiplier (default 1.1): A multiplier to apply to the wait duration on each retry; applies exponential backoff
 
 ### Defaults
 
-As mentioned above, the top level `defaults` key holds globally applied defaults for any check parameters not specified, or for unspecified retry_policy keys.
+As mentioned above, the top level `defaults` key holds globally applied defaults for any check parameters not specified, or for unspecified retryPolicy keys.
 
 For check-type keys, the values are the same as the set of parameters for the check type.
 
-For `retry_policy`, it's the same as a retry policy as you'd define in a check.
+For `retryPolicy`, it's the same as a retry policy as you'd define in a check.
 
 These can be used to override built-in defaults given above.
 
 ## TODO
-
-### Flake Helpers
-
-I want to add a module and lib functions to help generate the config file from within node configuration.
 
 ### More Check Configuration
 
