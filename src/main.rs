@@ -68,7 +68,7 @@ impl CheckUpdate {
         if let CheckMessage::Debug(_) = &self.msg {
             return true;
         }
-        return false;
+        false
     }
 }
 
@@ -81,25 +81,31 @@ impl Display for CheckUpdate {
 async fn print_output(rx: Receiver<CheckUpdate>, verbose: bool) {
     while let Ok(update) = rx.recv() {
         if verbose || !update.is_debug() {
-            print!("{}\n", update);
+            println!("{}", update);
         }
     }
 }
 
 fn send_update(updates: &Sender<CheckUpdate>, checker: &Box<dyn Checker>, status: CheckStatus) {
-    if let Err(_) = updates.send(CheckUpdate {
-        id: checker.id().to_owned(),
-        msg: CheckMessage::Status(status),
-    }) {
+    if updates
+        .send(CheckUpdate {
+            id: checker.id(),
+            msg: CheckMessage::Status(status),
+        })
+        .is_err()
+    {
         // TODO handle this error; I guess print to stderr?
     }
 }
 
 fn send_debug(updates: &Sender<CheckUpdate>, id: String, debug_msg: String) {
-    if let Err(_) = updates.send(CheckUpdate {
-        id,
-        msg: CheckMessage::Debug(debug_msg),
-    }) {
+    if updates
+        .send(CheckUpdate {
+            id,
+            msg: CheckMessage::Debug(debug_msg),
+        })
+        .is_err()
+    {
         // TODO handle this error; I guess print to stderr?
     }
 }

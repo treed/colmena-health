@@ -6,16 +6,10 @@ use trust_dns_resolver::TokioAsyncResolver;
 
 use crate::Checker as CheckerTrait;
 
-#[derive(Clone, Deserialize, Debug, Merge)]
+#[derive(Clone, Default, Deserialize, Debug, Merge)]
 pub struct OptionalConfig {
     domain: Option<String>,
     // TODO add record type, possibly expected result
-}
-
-impl Default for OptionalConfig {
-    fn default() -> Self {
-        OptionalConfig { domain: None }
-    }
 }
 
 #[derive(Debug)]

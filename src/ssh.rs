@@ -78,11 +78,7 @@ impl Checker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        Box::new(Checker {
-            config,
-            debug: debug.clone(),
-            ssh,
-        })
+        Box::new(Checker { config, debug, ssh })
     }
 }
 
@@ -111,7 +107,7 @@ impl CheckerTrait for Checker {
             return Err(eyre!("Command returned exit code {}\n{}", code, log));
         }
 
-        send_debug(&self.debug, self.id().to_owned(), log);
+        send_debug(&self.debug, self.id(), log);
 
         return Ok(());
     }

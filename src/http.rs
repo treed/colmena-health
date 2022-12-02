@@ -2,22 +2,15 @@ use std::sync::mpsc::Sender;
 
 use async_trait::async_trait;
 use merge::Merge;
-use reqwest;
 use serde::Deserialize;
 use simple_eyre::eyre::{eyre, Error as EyreError, Result, WrapErr};
 
 use crate::{send_debug, CheckUpdate, Checker as CheckerTrait};
 
-#[derive(Clone, Deserialize, Debug, Merge)]
+#[derive(Clone, Default, Deserialize, Debug, Merge)]
 pub struct OptionalConfig {
     url: Option<String>,
     // TODO expected status codes
-}
-
-impl Default for OptionalConfig {
-    fn default() -> Self {
-        OptionalConfig { url: None }
-    }
 }
 
 #[derive(Debug)]
@@ -63,7 +56,7 @@ impl CheckerTrait for Checker {
     }
 
     async fn check(&mut self) -> Result<()> {
-        send_debug(&self.debug, self.id().to_owned(), "making request".to_owned());
+        send_debug(&self.debug, self.id(), "making request".to_owned());
         let response = self
             .client
             .get(self.config.url.clone())
@@ -72,11 +65,7 @@ impl CheckerTrait for Checker {
             .wrap_err("Error making HTTP request")?;
 
         let status = response.status();
-        send_debug(
-            &self.debug,
-            self.id().to_owned(),
-            format!("response status: {:?}", status),
-        );
+        send_debug(&self.debug, self.id(), format!("response status: {:?}", status));
 
         if !status.is_success() {
             let error = response
@@ -84,7 +73,7 @@ impl CheckerTrait for Checker {
                 .await
                 .wrap_err(format!("Received HTTP error '{}' and unable to read body", status))?;
 
-            return Err(eyre!(error.to_string()));
+            return Err(eyre!(error));
         }
 
         return Ok(());
