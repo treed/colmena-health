@@ -7,6 +7,7 @@ use simple_eyre::eyre::{Error as EyreError, Result};
 use crate::{dns, http, retry, ssh};
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct CheckDefinition {
     pub retry_policy: Option<retry::OptionalPolicy>,
     pub check_timeout: Option<f64>,
@@ -25,6 +26,7 @@ pub enum CheckConfig {
 }
 
 #[derive(Deserialize, Debug, Default, Merge)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigDefaults {
     pub ssh: Option<ssh::OptionalConfig>,
     pub dns: Option<dns::OptionalConfig>,

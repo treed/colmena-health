@@ -46,7 +46,7 @@
 
     retryPolicy = types.submodule {
       options = {
-        max_retries = mkOption {
+        maxRetries = mkOption {
           type = types.nullOr types.int;
           default = null;
         };
@@ -61,11 +61,11 @@
       };
     };
     checkDefinitionCommon = {
-      retry_policy = mkOption {
+      retryPolicy = mkOption {
         type = types.nullOr retryPolicy;
         default = null;
       };
-      check_timeout = mkOption {
+      checkTimeout = mkOption {
         type = types.nullOr types.float;
         default = null;
       };

@@ -6,6 +6,7 @@ use simple_eyre::eyre::{eyre, Error as EyreError, Result};
 use tokio::time::sleep;
 
 #[derive(Clone, Deserialize, Debug, Merge)]
+#[serde(rename_all = "camelCase")]
 pub struct OptionalPolicy {
     max_retries: Option<u16>,
     initial: Option<f64>,
