@@ -161,7 +161,7 @@ async fn run_check(
 }
 #[derive(Parser, Debug)]
 struct Args {
-    #[clap(long = "select")]
+    #[clap(short, long)]
     select: Option<String>,
     config_file: String,
 }
