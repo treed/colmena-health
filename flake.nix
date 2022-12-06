@@ -1,5 +1,9 @@
 {
   inputs = {
+    alejandra = {
+      url = "github:kamadorueda/alejandra/3.0.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     crane = {
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -8,7 +12,14 @@
     utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, crane, nixpkgs, utils, ... }:
+  outputs = {
+    self,
+    alejandra,
+    crane,
+    nixpkgs,
+    utils,
+    ...
+  }:
     {
       nixosModules.healthcheckOptions = import ./options.nix;
 
@@ -19,7 +30,7 @@
           lib.attrsets.recursiveUpdate {
             labels.hostname = hostname;
           }
-            checkDef;
+          checkDef;
 
         mkChecks = let
           doMods = mods: hostname: node: checkDef: lib.lists.foldl (x: f: f x) checkDef (builtins.map (m: m hostname node) mods);
@@ -36,72 +47,78 @@
           utils.lib.mkApp {drv = checkScript;};
       };
     }
-    //
-    utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-        craneLib = crane.lib.${system};
+    // utils.lib.eachDefaultSystem (system: let
+      pkgs = import nixpkgs {inherit system;};
+      craneLib = crane.lib.${system};
 
-        commonArgs = {
-          src = craneLib.cleanCargoSource ./.;
-          pname = "colmena-health";
-          version = "0.1.0";
+      commonArgs = {
+        src = craneLib.cleanCargoSource ./.;
+        pname = "colmena-health";
+        version = "0.1.0";
 
-          nativeBuildInputs = with pkgs; [
-            pkg-config
-          ];
-          buildInputs = with pkgs; [
+        nativeBuildInputs = with pkgs; [
+          pkg-config
+        ];
+        buildInputs = with pkgs;
+          [
             openssl
-          ] ++ lib.optionals pkgs.stdenv.isDarwin [
+          ]
+          ++ lib.optionals pkgs.stdenv.isDarwin [
             libiconv
             darwin.apple_sdk.frameworks.Security
           ];
-        };
+      };
 
-        cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+      cargoArtifacts = craneLib.buildDepsOnly (commonArgs
+        // {
         });
-        colmena-health = craneLib.buildPackage (commonArgs // {
+      colmena-health = craneLib.buildPackage (commonArgs
+        // {
           inherit cargoArtifacts;
 
           doCheck = true;
         });
-      in
-      {
-        packages.default = colmena-health;
+    in {
+      packages.default = colmena-health;
 
-        apps.default = utils.lib.mkApp {
-          drv = self.packages.${system}.default;
-        };
+      apps.default = utils.lib.mkApp {
+        drv = self.packages.${system}.default;
+      };
 
-        devShells.default = with pkgs; mkShell {
+      devShells.default = with pkgs;
+        mkShell {
           nativeBuildInputs = [
             pkg-config
           ];
-          buildInputs = [
-            cargo
-            rust-analyzer
-            rustPackages.clippy
-            rustc
-            rustfmt
+          buildInputs =
+            [
+              cargo
+              rust-analyzer
+              rustPackages.clippy
+              rustc
+              rustfmt
 
-            openssl
-          ] ++ lib.optionals pkgs.stdenv.isDarwin [
-            libiconv
-            darwin.apple_sdk.frameworks.Security
-          ];
+              openssl
+            ]
+            ++ lib.optionals pkgs.stdenv.isDarwin [
+              libiconv
+              darwin.apple_sdk.frameworks.Security
+            ];
         };
 
-        checks = {
-          inherit colmena-health;
-        };
-      }) // {
-        # These only run on NixOS anyway
-        hydraJobs.x86_64-linux.tests = (let
-          pkgs = nixpkgs.legacyPackages.x86_64-linux;
-          checker = "${self.packages.x86_64-linux.default}/bin/colmena-health";
-        in
-          {
-            ssh = import ./nixos-tests/ssh.nix { inherit pkgs checker; };
-          });
+      formatter = alejandra.packages.${system}.default;
+
+      checks = {
+        inherit colmena-health;
       };
+    })
+    // {
+      # These only run on NixOS anyway
+      hydraJobs.x86_64-linux.tests = let
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        checker = "${self.packages.x86_64-linux.default}/bin/colmena-health";
+      in {
+        ssh = import ./nixos-tests/ssh.nix {inherit pkgs checker;};
+      };
+    };
 }
