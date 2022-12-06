@@ -90,16 +90,18 @@
             darwin.apple_sdk.frameworks.Security
           ];
         };
+
+        checks = {
+          inherit colmena-health;
+        };
       }) // {
-        # I was unable to get this working for eachDefaultSystem
-        # `nix flake check` kept trying to run VMs with darwin as a host despite being on NixOS
-        # Although, it could be that these tests can only work on NixOS anyway
-        checks.x86_64-linux = (let
+        # These only run on NixOS anyway
+        hydraJobs.x86_64-linux.tests = (let
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
           checker = "${self.packages.x86_64-linux.default}/bin/colmena-health";
         in
           {
-            testSsh = import ./nixos-tests/ssh.nix { inherit pkgs checker; };
+            ssh = import ./nixos-tests/ssh.nix { inherit pkgs checker; };
           });
       };
 }
