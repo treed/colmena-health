@@ -1,11 +1,14 @@
 {
   inputs = {
-    naersk.url = "github:nmattia/naersk/master";
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.05";
     utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, utils, naersk, ... }:
+  outputs = { self, crane, nixpkgs, utils, ... }:
     {
       nixosModules.healthcheckOptions = import ./options.nix;
 
@@ -37,27 +40,31 @@
     utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        naersk-lib = pkgs.callPackage naersk { };
-        libPath = with pkgs; lib.makeLibraryPath [
-          openssl
-        ];
-      in
-      {
-        packages.default = naersk-lib.buildPackage {
-          src = ./.;
-          doCheck = true;
+        craneLib = crane.lib.${system};
+
+        commonArgs = {
+          src = craneLib.cleanCargoSource ./.;
           pname = "colmena-health";
+          version = "0.1.0";
+
           nativeBuildInputs = with pkgs; [
-            makeWrapper
             pkg-config
           ];
           buildInputs = with pkgs; [
             openssl
           ];
-          postInstall = ''
-            wrapProgram "$out/bin/colmena-health" --prefix LD_LIBRARY_PATH : "${libPath}"
-          '';
         };
+
+        cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+        });
+        colmena-health = craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
+
+          doCheck = true;
+        });
+      in
+      {
+        packages.default = colmena-health;
 
         apps.default = utils.lib.mkApp {
           drv = self.packages.${system}.default;
@@ -69,22 +76,16 @@
           ];
           buildInputs = [
             cargo
-            cargo-insta
-            pre-commit
             rust-analyzer
             rustPackages.clippy
             rustc
             rustfmt
-            openssh
 
             openssl
           ] ++ lib.optionals pkgs.stdenv.isDarwin [
             libiconv
             darwin.apple_sdk.frameworks.Security
           ];
-          RUST_SRC_PATH = rustPlatform.rustLibSrc;
-          LD_LIBRARY_PATH = libPath;
-          # GIT_EXTERNAL_DIFF = "${difftastic}/bin/difft";
         };
       });
 }
