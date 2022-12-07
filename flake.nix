@@ -117,8 +117,14 @@
       hydraJobs.x86_64-linux.tests = let
         pkgs = nixpkgs.legacyPackages.x86_64-linux;
         checker = "${self.packages.x86_64-linux.default}/bin/colmena-health";
-      in {
+        dns = import ./nixos-tests/dns.nix {inherit pkgs checker;};
         ssh = import ./nixos-tests/ssh.nix {inherit pkgs checker;};
+      in {
+        inherit dns ssh;
+        all = pkgs.runCommand "all tests" {} ''
+          ${dns}
+          ${ssh}
+        '';
       };
     };
 }
