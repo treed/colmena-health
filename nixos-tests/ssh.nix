@@ -35,7 +35,7 @@
       defaults.ssh.hostname = "checked";
     });
   failureConfig =
-    pkgs.writeText "success.json"
+    pkgs.writeText "failure.json"
     (builtins.toJSON {
       checks = [
         {
