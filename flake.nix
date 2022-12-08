@@ -118,11 +118,13 @@
         pkgs = nixpkgs.legacyPackages.x86_64-linux;
         checker = "${self.packages.x86_64-linux.default}/bin/colmena-health";
         dns = import ./nixos-tests/dns.nix {inherit pkgs checker;};
+        http = import ./nixos-tests/http.nix {inherit pkgs checker;};
         ssh = import ./nixos-tests/ssh.nix {inherit pkgs checker;};
       in {
-        inherit dns ssh;
+        inherit dns http ssh;
         all = pkgs.runCommand "all tests" {} ''
           ${dns}
+          ${http}
           ${ssh}
         '';
       };
