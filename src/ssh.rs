@@ -62,8 +62,8 @@ pub struct Checker {
 }
 
 impl Checker {
-    pub fn new(id: usize, config: Config, updates: UnboundedSender<CheckUpdate>) -> Box<dyn CheckerTrait> {
-        Box::new(Checker { id, config, updates })
+    pub fn new(id: usize, config: Config, updates: UnboundedSender<CheckUpdate>) -> Self {
+        Checker { id, config, updates }
     }
 }
 

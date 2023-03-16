@@ -41,17 +41,17 @@ pub struct Checker {
 }
 
 impl Checker {
-    pub fn new(id: usize, config: Config, updates: UnboundedSender<CheckUpdate>) -> Result<Box<dyn CheckerTrait>> {
+    pub fn new(id: usize, config: Config, updates: UnboundedSender<CheckUpdate>) -> Result<Self> {
         let client = reqwest::ClientBuilder::new()
             .build()
             .wrap_err("Unable to construct http client")?;
 
-        Ok(Box::new(Checker {
+        Ok(Checker {
             id,
             config,
             client,
             updates,
-        }))
+        })
     }
 }
 

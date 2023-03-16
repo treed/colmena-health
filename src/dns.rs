@@ -39,10 +39,10 @@ pub struct Checker {
 }
 
 impl Checker {
-    pub fn new(id: usize, config: Config) -> Result<Box<dyn CheckerTrait>> {
+    pub fn new(id: usize, config: Config) -> Result<Self> {
         let resolver = TokioAsyncResolver::tokio_from_system_conf().wrap_err("Unable to construct resolver")?;
 
-        Ok(Box::new(Checker { id, config, resolver }))
+        Ok(Checker { id, config, resolver })
     }
 }
 

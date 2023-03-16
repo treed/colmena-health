@@ -166,20 +166,21 @@ fn main() -> Result<()> {
             }
         }
 
-        let checker = match check_def.config {
-            CheckConfig::Http(http_config) => http::Checker::new(
+        let checker: Box<dyn Checker> = match check_def.config {
+            CheckConfig::Http(http_config) => Box::new(http::Checker::new(
                 id,
                 config::prepare(config_defaults.http.clone(), http_config)?,
                 tx.clone(),
-            )?,
-            CheckConfig::Dns(dns_config) => {
-                dns::Checker::new(id, config::prepare(config_defaults.dns.clone(), dns_config)?)?
-            }
-            CheckConfig::Ssh(ref ssh_config) => ssh::Checker::new(
+            )?),
+            CheckConfig::Dns(dns_config) => Box::new(dns::Checker::new(
+                id,
+                config::prepare(config_defaults.dns.clone(), dns_config)?,
+            )?),
+            CheckConfig::Ssh(ssh_config) => Box::new(ssh::Checker::new(
                 id,
                 config::prepare(config_defaults.ssh.clone(), ssh_config.clone())?,
                 tx.clone(),
-            ),
+            )),
         };
 
         let name = checker.name();
