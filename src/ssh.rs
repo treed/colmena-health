@@ -1,12 +1,11 @@
-use std::sync::mpsc::Sender;
-
 use async_process::{Command, Stdio};
 use async_trait::async_trait;
 use merge::Merge;
 use serde::Deserialize;
 use simple_eyre::eyre::{eyre, Error as EyreError, Result, WrapErr};
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{send_debug, CheckUpdate, Checker as CheckerTrait};
+use crate::{send_update, CheckStatus, CheckUpdate, Checker as CheckerTrait};
 
 #[derive(Clone, Deserialize, Debug, Merge)]
 pub struct OptionalConfig {
@@ -57,39 +56,43 @@ impl TryFrom<OptionalConfig> for Config {
 }
 
 pub struct Checker {
+    id: usize,
     config: Config,
-    debug: Sender<CheckUpdate>,
-    ssh: Command,
+    updates: UnboundedSender<CheckUpdate>,
 }
 
 impl Checker {
-    pub fn new(config: Config, debug: Sender<CheckUpdate>) -> Box<dyn CheckerTrait> {
-        let mut ssh = Command::new("ssh");
-
-        ssh.arg(config.hostname.clone());
-
-        if let Some(ref user) = config.user {
-            ssh.arg(format!("-l{}", user));
-        }
-
-        ssh.arg(config.command.clone())
-            .kill_on_drop(true)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        Box::new(Checker { config, debug, ssh })
+    pub fn new(id: usize, config: Config, updates: UnboundedSender<CheckUpdate>) -> Box<dyn CheckerTrait> {
+        Box::new(Checker { id, config, updates })
     }
 }
 
 #[async_trait]
 impl CheckerTrait for Checker {
-    fn id(&self) -> String {
-        format!("ssh '{}': {}", self.config.hostname, self.config.command)
+    fn id(&self) -> usize {
+        self.id
     }
 
-    async fn check(&mut self) -> Result<()> {
-        let ssh_cmd = self.ssh.spawn().wrap_err("Unable to spawn ssh command")?;
+    fn name(&self) -> String {
+        format!("ssh {}: '{}'", self.config.hostname, self.config.command)
+    }
+
+    async fn check(&self) -> Result<()> {
+        let mut ssh = Command::new("ssh");
+        ssh.kill_on_drop(true)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        ssh.arg(self.config.hostname.clone());
+
+        if let Some(ref user) = self.config.user {
+            ssh.arg(format!("-l{}", user));
+        }
+
+        ssh.arg(self.config.command.clone());
+
+        let ssh_cmd = ssh.spawn().wrap_err("Unable to spawn ssh command")?;
 
         let output = ssh_cmd.output().await.wrap_err("Failed to get output from command")?;
 
@@ -107,7 +110,7 @@ impl CheckerTrait for Checker {
             return Err(eyre!("Command returned exit code {}\n{}", code, log));
         }
 
-        send_debug(&self.debug, self.id(), log);
+        send_update(&self.updates, self.id(), CheckStatus::Running, log);
 
         return Ok(());
     }

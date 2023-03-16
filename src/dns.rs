@@ -33,25 +33,30 @@ impl TryFrom<OptionalConfig> for Config {
 }
 
 pub struct Checker {
+    id: usize,
     config: Config,
     resolver: TokioAsyncResolver,
 }
 
 impl Checker {
-    pub fn new(config: Config) -> Result<Box<dyn CheckerTrait>> {
+    pub fn new(id: usize, config: Config) -> Result<Box<dyn CheckerTrait>> {
         let resolver = TokioAsyncResolver::tokio_from_system_conf().wrap_err("Unable to construct resolver")?;
 
-        Ok(Box::new(Checker { config, resolver }))
+        Ok(Box::new(Checker { id, config, resolver }))
     }
 }
 
 #[async_trait]
 impl CheckerTrait for Checker {
-    fn id(&self) -> String {
-        format!("dns '{}'", self.config.domain)
+    fn id(&self) -> usize {
+        self.id
     }
 
-    async fn check(&mut self) -> Result<()> {
+    fn name(&self) -> String {
+        format!("dns {}", self.config.domain)
+    }
+
+    async fn check(&self) -> Result<()> {
         self.resolver.lookup_ip(self.config.domain.clone()).await?;
 
         Ok(())

@@ -1,14 +1,14 @@
+use report::run_report;
+use std::collections::HashMap;
 use std::fmt::{self, Debug, Display};
+use std::fs;
 use std::io::{stdin, Read};
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use std::{fs, future};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use async_trait::async_trait;
 use clap::Parser;
-use futures::stream::futures_unordered::FuturesUnordered;
-use futures::StreamExt;
-use simple_eyre::eyre::{eyre, Result, WrapErr};
+use simple_eyre::eyre::{Result, WrapErr};
 use tokio::time::timeout as tokio_timeout;
 
 use config::CheckConfig;
@@ -16,93 +16,51 @@ use config::CheckConfig;
 mod config;
 mod dns;
 mod http;
+mod report;
 mod retry;
 mod select;
 mod ssh;
 
 #[async_trait]
 pub trait Checker {
-    fn id(&self) -> String;
-    async fn check(&mut self) -> Result<()>;
+    fn id(&self) -> usize;
+    fn name(&self) -> String;
+    async fn check(&self) -> Result<()>;
 }
 
 enum CheckStatus {
     Running,
-    Waiting(String),
+    Waiting,
     Succeeded,
-    Failed(String),
+    Failed,
 }
 
 impl Display for CheckStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             CheckStatus::Running => write!(f, "Running"),
-            CheckStatus::Waiting(last_failure) => write!(f, "Waiting after failure: {}", last_failure),
+            CheckStatus::Waiting => write!(f, "Waiting after failure"),
             CheckStatus::Succeeded => write!(f, "Succeeded"),
-            CheckStatus::Failed(reason) => write!(f, "Failed: {}", reason),
-        }
-    }
-}
-
-enum CheckMessage {
-    Status(CheckStatus),
-    Debug(String),
-}
-
-impl Display for CheckMessage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            CheckMessage::Status(status) => write!(f, "status update: {}", status),
-            CheckMessage::Debug(debug) => write!(f, "debug: {}", debug),
+            CheckStatus::Failed => write!(f, "Failed:"),
         }
     }
 }
 
 pub struct CheckUpdate {
-    id: String,
-    msg: CheckMessage,
+    id: usize,
+    status: CheckStatus,
+    msg: Option<String>,
 }
 
-impl CheckUpdate {
-    fn is_debug(&self) -> bool {
-        if let CheckMessage::Debug(_) = &self.msg {
-            return true;
-        }
-        false
-    }
-}
-
-impl Display for CheckUpdate {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{}] {}", self.id, self.msg)
-    }
-}
-
-async fn print_output(rx: Receiver<CheckUpdate>, verbose: bool) {
-    while let Ok(update) = rx.recv() {
-        if verbose || !update.is_debug() {
-            println!("{}", update);
-        }
-    }
-}
-
-fn send_update(updates: &Sender<CheckUpdate>, checker: &Box<dyn Checker>, status: CheckStatus) {
-    if updates
-        .send(CheckUpdate {
-            id: checker.id(),
-            msg: CheckMessage::Status(status),
-        })
-        .is_err()
-    {
-        // TODO handle this error; I guess print to stderr?
-    }
-}
-
-fn send_debug(updates: &Sender<CheckUpdate>, id: String, debug_msg: String) {
+fn send_update<M>(updates: &UnboundedSender<CheckUpdate>, id: usize, status: CheckStatus, msg: M)
+where
+    M: Into<Option<String>>,
+{
     if updates
         .send(CheckUpdate {
             id,
-            msg: CheckMessage::Debug(debug_msg),
+            status,
+            msg: msg.into(),
         })
         .is_err()
     {
@@ -125,35 +83,39 @@ impl CheckResult {
     }
 }
 
-async fn run_check(
-    mut checker: Box<dyn Checker>,
+pub struct RunnableCheck {
+    id: usize,
+    checker: Box<dyn Checker>,
     policy: retry::Policy,
     timeout: Duration,
-    updates: Sender<CheckUpdate>,
-) -> CheckResult {
-    let mut retrier = retry::Retrier::new(policy);
+    updates: UnboundedSender<CheckUpdate>,
+}
+
+async fn run_check(check: RunnableCheck) -> CheckResult {
+    let mut retrier = retry::Retrier::new(check.policy.clone());
 
     loop {
-        send_update(&updates, &checker, CheckStatus::Running);
+        send_update(&check.updates, check.id, CheckStatus::Running, None);
 
-        match tokio_timeout(timeout, checker.check())
+        match tokio_timeout(check.timeout, check.checker.check())
             .await
             .wrap_err("Check timed out")
         {
             Ok(Ok(_)) => {
-                send_update(&updates, &checker, CheckStatus::Succeeded);
+                send_update(&check.updates, check.id, CheckStatus::Succeeded, None);
                 return CheckResult::Success;
             }
             Err(err) | Ok(Err(err)) => {
-                send_update(&updates, &checker, CheckStatus::Waiting(err.to_string()));
+                send_update(&check.updates, check.id, CheckStatus::Waiting, err.to_string());
             }
         }
 
         if retrier.retry().await.is_none() {
             send_update(
-                &updates,
-                &checker,
-                CheckStatus::Failed("Maximum retries reached".to_owned()),
+                &check.updates,
+                check.id,
+                CheckStatus::Failed,
+                "Maximum retries reached".to_owned(),
             );
             return CheckResult::Failure;
         }
@@ -172,11 +134,6 @@ fn main() -> Result<()> {
     simple_eyre::install()?;
 
     let args = Args::parse();
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_time()
-        .enable_io()
-        .worker_threads(4)
-        .build()?;
 
     let label_selector: Option<select::Term> = match args.select {
         Some(sel) => Some(sel.parse()?),
@@ -193,10 +150,12 @@ fn main() -> Result<()> {
     let config: config::Config = serde_json::from_str(&config_data)?;
     let config_defaults = config.defaults.unwrap_or_default();
 
-    let checks = FuturesUnordered::new();
-    let (tx, rx) = channel::<CheckUpdate>();
+    let mut checks = Vec::new();
+    let (tx, rx) = unbounded_channel::<CheckUpdate>();
 
-    for check_def in config.checks.into_iter() {
+    let mut check_registry = HashMap::new();
+
+    for (id, check_def) in config.checks.into_iter().enumerate() {
         if let Some(ref sel) = label_selector {
             if let Some(labels) = check_def.labels {
                 if !sel.matches(&labels) {
@@ -208,40 +167,42 @@ fn main() -> Result<()> {
         }
 
         let checker = match check_def.config {
-            CheckConfig::Http(http_config) => {
-                http::Checker::new(config::prepare(config_defaults.http.clone(), http_config)?, tx.clone())?
-            }
+            CheckConfig::Http(http_config) => http::Checker::new(
+                id,
+                config::prepare(config_defaults.http.clone(), http_config)?,
+                tx.clone(),
+            )?,
             CheckConfig::Dns(dns_config) => {
-                dns::Checker::new(config::prepare(config_defaults.dns.clone(), dns_config)?)?
+                dns::Checker::new(id, config::prepare(config_defaults.dns.clone(), dns_config)?)?
             }
-            CheckConfig::Ssh(ssh_config) => {
-                ssh::Checker::new(config::prepare(config_defaults.ssh.clone(), ssh_config)?, tx.clone())
-            }
+            CheckConfig::Ssh(ref ssh_config) => ssh::Checker::new(
+                id,
+                config::prepare(config_defaults.ssh.clone(), ssh_config.clone())?,
+                tx.clone(),
+            ),
         };
-        let check = run_check(
+
+        let name = checker.name();
+
+        let runnable = RunnableCheck {
+            id,
             checker,
-            config::prepare(
+            policy: config::prepare(
                 config_defaults.retry_policy.clone(),
                 check_def.retry_policy.unwrap_or_else(retry::OptionalPolicy::new_empty),
             )?,
-            Duration::from_secs_f64(check_def.check_timeout.unwrap_or(10.0)),
-            tx.clone(),
-        );
+            timeout: Duration::from_secs_f64(check_def.check_timeout.unwrap_or(10.0)),
+            updates: tx.clone(),
+        };
 
-        checks.push(check);
+        check_registry.insert(id, name);
+
+        checks.push(runnable);
     }
 
     drop(tx);
 
-    let printer = rt.spawn(print_output(rx, false));
-
-    let failures = rt.block_on(checks.filter(|res| future::ready(res.is_failure())).count());
-
-    rt.block_on(printer)?;
-
-    if failures > 0 {
-        return Err(eyre!("{} check(s) failed", failures));
-    }
+    run_report(checks, check_registry, rx)?;
 
     Ok(())
 }
