@@ -4,7 +4,7 @@ use serde::Deserialize;
 use simple_eyre::eyre::{eyre, Error as EyreError, Result, WrapErr};
 use trust_dns_resolver::TokioAsyncResolver;
 
-use crate::Checker as CheckerTrait;
+use crate::{Checker as CheckerTrait, UpdateChan};
 
 #[derive(Clone, Default, Deserialize, Debug, Merge)]
 pub struct OptionalConfig {
@@ -56,7 +56,7 @@ impl CheckerTrait for Checker {
         format!("dns {}", self.config.domain)
     }
 
-    async fn check(&self) -> Result<()> {
+    async fn check(&self, _updates: &UpdateChan) -> Result<()> {
         self.resolver.lookup_ip(self.config.domain.clone()).await?;
 
         Ok(())

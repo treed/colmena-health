@@ -3,9 +3,8 @@ use async_trait::async_trait;
 use merge::Merge;
 use serde::Deserialize;
 use simple_eyre::eyre::{eyre, Error as EyreError, Result, WrapErr};
-use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{send_update, CheckStatus, CheckUpdate, Checker as CheckerTrait};
+use crate::{CheckStatus, Checker as CheckerTrait, UpdateChan};
 
 #[derive(Clone, Deserialize, Debug, Merge)]
 pub struct OptionalConfig {
@@ -58,12 +57,11 @@ impl TryFrom<OptionalConfig> for Config {
 pub struct Checker {
     id: usize,
     config: Config,
-    updates: UnboundedSender<CheckUpdate>,
 }
 
 impl Checker {
-    pub fn new(id: usize, config: Config, updates: UnboundedSender<CheckUpdate>) -> Self {
-        Checker { id, config, updates }
+    pub fn new(id: usize, config: Config) -> Self {
+        Checker { id, config }
     }
 }
 
@@ -77,7 +75,7 @@ impl CheckerTrait for Checker {
         format!("ssh {}: '{}'", self.config.hostname, self.config.command)
     }
 
-    async fn check(&self) -> Result<()> {
+    async fn check(&self, updates: &UpdateChan) -> Result<()> {
         let mut ssh = Command::new("ssh");
         ssh.kill_on_drop(true)
             .stdin(Stdio::null())
@@ -110,7 +108,7 @@ impl CheckerTrait for Checker {
             return Err(eyre!("Command returned exit code {}\n{}", code, log));
         }
 
-        send_update(&self.updates, self.id(), CheckStatus::Running, log);
+        updates.send(CheckStatus::Running, log);
 
         return Ok(());
     }

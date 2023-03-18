@@ -25,7 +25,7 @@ mod ssh;
 pub trait Checker {
     fn id(&self) -> usize;
     fn name(&self) -> String;
-    async fn check(&self) -> Result<()>;
+    async fn check(&self, updates: &UpdateChan) -> Result<()>;
 }
 
 enum CheckStatus {
@@ -52,19 +52,32 @@ pub struct CheckUpdate {
     msg: Option<String>,
 }
 
-fn send_update<M>(updates: &UnboundedSender<CheckUpdate>, id: usize, status: CheckStatus, msg: M)
-where
-    M: Into<Option<String>>,
-{
-    if updates
-        .send(CheckUpdate {
-            id,
-            status,
-            msg: msg.into(),
-        })
-        .is_err()
+#[derive(Clone)]
+pub struct UpdateChan {
+    id: usize,
+    updates: UnboundedSender<CheckUpdate>,
+}
+
+impl UpdateChan {
+    fn new(id: usize, updates: UnboundedSender<CheckUpdate>) -> Self {
+        UpdateChan { id, updates }
+    }
+
+    fn send<M>(&self, status: CheckStatus, msg: M)
+    where
+        M: Into<Option<String>>,
     {
-        // TODO handle this error; I guess print to stderr?
+        if self
+            .updates
+            .send(CheckUpdate {
+                id: self.id,
+                status,
+                msg: msg.into(),
+            })
+            .is_err()
+        {
+            // TODO handle this error; I guess print to stderr?
+        }
     }
 }
 
@@ -88,35 +101,32 @@ pub struct RunnableCheck {
     checker: Box<dyn Checker>,
     policy: retry::Policy,
     timeout: Duration,
-    updates: UnboundedSender<CheckUpdate>,
+    updates: UpdateChan,
 }
 
 async fn run_check(check: RunnableCheck) -> CheckResult {
     let mut retrier = retry::Retrier::new(check.policy.clone());
 
     loop {
-        send_update(&check.updates, check.id, CheckStatus::Running, None);
+        check.updates.send(CheckStatus::Running, None);
 
-        match tokio_timeout(check.timeout, check.checker.check())
+        match tokio_timeout(check.timeout, check.checker.check(&check.updates))
             .await
             .wrap_err("Check timed out")
         {
             Ok(Ok(_)) => {
-                send_update(&check.updates, check.id, CheckStatus::Succeeded, None);
+                check.updates.send(CheckStatus::Succeeded, None);
                 return CheckResult::Success;
             }
             Err(err) | Ok(Err(err)) => {
-                send_update(&check.updates, check.id, CheckStatus::Waiting, err.to_string());
+                check.updates.send(CheckStatus::Waiting, err.to_string());
             }
         }
 
         if retrier.retry().await.is_none() {
-            send_update(
-                &check.updates,
-                check.id,
-                CheckStatus::Failed,
-                "Maximum retries reached".to_owned(),
-            );
+            check
+                .updates
+                .send(CheckStatus::Failed, "Maximum retries reached".to_owned());
             return CheckResult::Failure;
         }
     }
@@ -168,6 +178,7 @@ fn main() -> Result<()> {
 
         let checker: Box<dyn Checker> = match check_def.config {
             CheckConfig::Http(http_config) => Box::new(http::Checker::new(
+        let updates = UpdateChan::new(id, tx.clone());
                 id,
                 config::prepare(config_defaults.http.clone(), http_config)?,
                 tx.clone(),
@@ -193,7 +204,7 @@ fn main() -> Result<()> {
                 check_def.retry_policy.unwrap_or_else(retry::OptionalPolicy::new_empty),
             )?,
             timeout: Duration::from_secs_f64(check_def.check_timeout.unwrap_or(10.0)),
-            updates: tx.clone(),
+            updates,
         };
 
         check_registry.insert(id, name);
