@@ -51,31 +51,31 @@
     retryPolicy = types.submodule {
       options = {
         maxRetries = mkOption {
-          type = types.nullOr types.int;
-          default = null;
+          type = types.int;
+          default = 3;
         };
         initial = mkOption {
-          type = types.nullOr types.float;
-          default = null;
+          type = types.float;
+          default = 1.0;
         };
         multiplier = mkOption {
-          type = types.nullOr types.float;
-          default = null;
+          type = types.float;
+          default = 1.1;
         };
       };
     };
     checkDefinitionCommon = {
       retryPolicy = mkOption {
-        type = types.nullOr retryPolicy;
-        default = null;
+        type = retryPolicy;
+        default = { maxRetries = 3; initial = 1.0; multiplier = 1.1; };
       };
       checkTimeout = mkOption {
-        type = types.nullOr types.float;
-        default = null;
+        type = types.float;
+        default = 10;
       };
       labels = mkOption {
-        type = types.nullOr types.attrs;
-        default = null;
+        type = types.attrs;
+        default = {};
       };
     };
 

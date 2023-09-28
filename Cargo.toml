@@ -10,7 +10,6 @@ async-process = "1.4.0"
 async-trait = "0.1.57"
 clap = { version = "4.0.0", features = ["derive"] }
 futures = "0.3.21"
-merge = "0.1.0"
 nom = "7.1.1"
 regex = "1.7.0"
 serde = { version = "1.0.138", features = ["derive"] }
@@ -19,3 +18,4 @@ simple-eyre = "0.3"
 tokio = { version =  "1.19.2", features = ["full", "rt-multi-thread"] }
 trust-dns-resolver = "0.21.2"
 reqwest = "0.11.11"
+serde_with = "3.3.0"

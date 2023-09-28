@@ -1,34 +1,14 @@
 use async_trait::async_trait;
-use merge::Merge;
 use serde::Deserialize;
-use simple_eyre::eyre::{eyre, Error as EyreError, Result, WrapErr};
+use simple_eyre::eyre::{eyre, Result, WrapErr};
 
 use crate::{CheckStatus, Checker as CheckerTrait, UpdateChan};
 
-#[derive(Clone, Default, Deserialize, Debug, Merge)]
-pub struct OptionalConfig {
-    url: Option<String>,
-    // TODO expected status codes
-}
+#[derive(Clone, Default, Deserialize, Debug)]
 
-#[derive(Debug)]
 pub struct Config {
     url: String,
-}
-
-impl TryFrom<OptionalConfig> for Config {
-    type Error = EyreError;
-
-    fn try_from(cfg: OptionalConfig) -> Result<Config> {
-        // could use .ok_or, but it's unstable
-        // https://github.com/rust-lang/rust/issues/91930
-        let url = match cfg.url {
-            Some(url) => url,
-            None => return Err(eyre!("'url' is a required field for http checks")),
-        };
-
-        Ok(Config { url })
-    }
+    // TODO expected status codes
 }
 
 pub struct Checker {

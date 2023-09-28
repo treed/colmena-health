@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 
-use merge::Merge;
 use serde::Deserialize;
-use simple_eyre::eyre::{Error as EyreError, Result};
 
-use crate::{dns, http, retry, ssh};
+use simple_eyre::eyre::Result;
+
+use crate::{dns, http, retry, ssh, Checker as CheckerTrait};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckDefinition {
-    pub retry_policy: Option<retry::OptionalPolicy>,
-    pub check_timeout: Option<f64>,
-    pub labels: Option<HashMap<String, String>>,
+    pub retry_policy: retry::Policy,
+    pub check_timeout: f64,
+    pub labels: HashMap<String, String>,
 
     #[serde(flatten)]
     pub config: CheckConfig,
@@ -20,37 +20,22 @@ pub struct CheckDefinition {
 #[derive(Clone, Deserialize, Debug)]
 #[serde(tag = "type", content = "params", rename_all = "lowercase")]
 pub enum CheckConfig {
-    Http(http::OptionalConfig),
-    Dns(dns::OptionalConfig),
-    Ssh(ssh::OptionalConfig),
+    Http(http::Config),
+    Dns(dns::Config),
+    Ssh(ssh::Config),
 }
 
-#[derive(Deserialize, Debug, Default, Merge)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigDefaults {
-    pub ssh: Option<ssh::OptionalConfig>,
-    pub dns: Option<dns::OptionalConfig>,
-    pub http: Option<http::OptionalConfig>,
-    pub retry_policy: Option<retry::OptionalPolicy>,
+impl CheckConfig {
+    pub fn into_check(self, id: usize) -> Result<Box<dyn CheckerTrait>> {
+        Ok(match self {
+            CheckConfig::Http(http_config) => Box::new(http::Checker::new(id, http_config)?),
+            CheckConfig::Dns(dns_config) => Box::new(dns::Checker::new(id, dns_config)?),
+            CheckConfig::Ssh(ssh_config) => Box::new(ssh::Checker::new(id, ssh_config)),
+        })
+    }
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
-    pub defaults: Option<ConfigDefaults>,
     pub checks: Vec<CheckDefinition>,
-}
-
-pub fn prepare<T, F>(global: Option<T>, mut check: T) -> Result<F>
-where
-    T: Merge + Default,
-    F: TryFrom<T, Error = EyreError>,
-{
-    if let Some(mut g) = global {
-        g.merge(T::default());
-        check.merge(g);
-    } else {
-        check.merge(T::default());
-    }
-
-    F::try_from(check)
 }

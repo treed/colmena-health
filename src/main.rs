@@ -11,8 +11,6 @@ use clap::Parser;
 use simple_eyre::eyre::{Result, WrapErr};
 use tokio::time::timeout as tokio_timeout;
 
-use config::CheckConfig;
-
 mod config;
 mod dns;
 mod http;
@@ -97,7 +95,6 @@ impl CheckResult {
 }
 
 pub struct RunnableCheck {
-    id: usize,
     checker: Box<dyn Checker>,
     policy: retry::Policy,
     timeout: Duration,
@@ -158,7 +155,6 @@ fn main() -> Result<()> {
         fs::read_to_string(args.config_file)?
     };
     let config: config::Config = serde_json::from_str(&config_data)?;
-    let config_defaults = config.defaults.unwrap_or_default();
 
     let mut checks = Vec::new();
     let (tx, rx) = unbounded_channel::<CheckUpdate>();
@@ -167,47 +163,20 @@ fn main() -> Result<()> {
 
     for (id, check_def) in config.checks.into_iter().enumerate() {
         if let Some(ref sel) = label_selector {
-            if let Some(labels) = check_def.labels {
-                if !sel.matches(&labels) {
-                    continue;
-                }
-            } else {
+            if !sel.matches(&check_def.labels) {
                 continue;
             }
         }
 
-        let checker: Box<dyn Checker> = match check_def.config {
-            CheckConfig::Http(http_config) => Box::new(http::Checker::new(
-        let updates = UpdateChan::new(id, tx.clone());
-                id,
-                config::prepare(config_defaults.http.clone(), http_config)?,
-                tx.clone(),
-            )?),
-            CheckConfig::Dns(dns_config) => Box::new(dns::Checker::new(
-                id,
-                config::prepare(config_defaults.dns.clone(), dns_config)?,
-            )?),
-            CheckConfig::Ssh(ssh_config) => Box::new(ssh::Checker::new(
-                id,
-                config::prepare(config_defaults.ssh.clone(), ssh_config.clone())?,
-                tx.clone(),
-            )),
-        };
-
-        let name = checker.name();
+        let checker = check_def.config.clone().into_check(id)?;
+        check_registry.insert(id, checker.name());
 
         let runnable = RunnableCheck {
-            id,
             checker,
-            policy: config::prepare(
-                config_defaults.retry_policy.clone(),
-                check_def.retry_policy.unwrap_or_else(retry::OptionalPolicy::new_empty),
-            )?,
-            timeout: Duration::from_secs_f64(check_def.check_timeout.unwrap_or(10.0)),
-            updates,
+            policy: check_def.retry_policy,
+            timeout: Duration::from_secs_f64(check_def.check_timeout),
+            updates: UpdateChan::new(id, tx.clone()),
         };
-
-        check_registry.insert(id, name);
 
         checks.push(runnable);
     }

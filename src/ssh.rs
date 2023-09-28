@@ -1,57 +1,15 @@
 use async_process::{Command, Stdio};
 use async_trait::async_trait;
-use merge::Merge;
 use serde::Deserialize;
-use simple_eyre::eyre::{eyre, Error as EyreError, Result, WrapErr};
+use simple_eyre::eyre::{eyre, Result, WrapErr};
 
 use crate::{CheckStatus, Checker as CheckerTrait, UpdateChan};
 
-#[derive(Clone, Deserialize, Debug, Merge)]
-pub struct OptionalConfig {
-    command: Option<String>,
-    hostname: Option<String>,
-    user: Option<String>,
-}
-
-impl Default for OptionalConfig {
-    fn default() -> Self {
-        OptionalConfig {
-            command: None,
-            hostname: None,
-            user: Some("root".to_owned()),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Clone, Deserialize, Debug)]
 pub struct Config {
     command: String,
     hostname: String,
     user: Option<String>,
-}
-
-impl TryFrom<OptionalConfig> for Config {
-    type Error = EyreError;
-
-    fn try_from(cfg: OptionalConfig) -> Result<Config> {
-        // could use .ok_or, but it's unstable
-        // https://github.com/rust-lang/rust/issues/91930
-        let command = match cfg.command {
-            Some(command) => command,
-            None => return Err(eyre!("'command' is a required field for ssh checks")),
-        };
-
-        let hostname = match cfg.hostname {
-            Some(hostname) => hostname,
-            None => return Err(eyre!("'hostname' is a required field for ssh checks")),
-        };
-
-        Ok(Config {
-            command,
-            hostname,
-            user: cfg.user,
-        })
-    }
 }
 
 pub struct Checker {

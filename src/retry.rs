@@ -1,72 +1,17 @@
 use std::time::Duration;
 
-use merge::Merge;
 use serde::Deserialize;
-use simple_eyre::eyre::{eyre, Error as EyreError, Result};
+use serde_with::{serde_as, DurationSeconds};
 use tokio::time::sleep;
 
-#[derive(Clone, Deserialize, Debug, Merge)]
-#[serde(rename_all = "camelCase")]
-pub struct OptionalPolicy {
-    max_retries: Option<u16>,
-    initial: Option<f64>,
-    multiplier: Option<f64>,
-}
-
-impl Default for OptionalPolicy {
-    fn default() -> Self {
-        OptionalPolicy {
-            max_retries: Some(3),
-            initial: Some(1.0),
-            multiplier: Some(1.1),
-        }
-    }
-}
-
-impl OptionalPolicy {
-    pub fn new_empty() -> OptionalPolicy {
-        OptionalPolicy {
-            max_retries: None,
-            initial: None,
-            multiplier: None,
-        }
-    }
-}
-
+#[serde_as]
 #[derive(Clone, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct Policy {
     max_retries: u16,
+    #[serde_as(as = "DurationSeconds<f64>")]
     initial: Duration,
     multiplier: f64,
-}
-
-impl TryFrom<OptionalPolicy> for Policy {
-    type Error = EyreError;
-
-    fn try_from(policy: OptionalPolicy) -> Result<Policy> {
-        // could use .ok_or, but it's unstable
-        // https://github.com/rust-lang/rust/issues/91930
-        let max_retries = match policy.max_retries {
-            Some(max_retries) => max_retries,
-            None => return Err(eyre!("'max_retries' is a required field for ssh checks")),
-        };
-
-        let initial = match policy.initial {
-            Some(initial) => Duration::from_secs_f64(initial),
-            None => return Err(eyre!("'initial' is a required field for ssh checks")),
-        };
-
-        let multiplier = match policy.multiplier {
-            Some(multiplier) => multiplier,
-            None => return Err(eyre!("'multiplier' is a required field for ssh checks")),
-        };
-
-        Ok(Policy {
-            max_retries,
-            initial,
-            multiplier,
-        })
-    }
 }
 
 pub struct Retrier {
