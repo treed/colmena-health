@@ -48,6 +48,18 @@
     oneOfTagged = definitions:
       types.oneOf (mapAttrDefs definitions);
 
+    alertPolicy = types.submodule {
+      options = {
+        checkInterval = mkOption {
+          type = types.float;
+          default = 300;
+        };
+        recheckInterval = mkOption {
+          type = types.float;
+          default = 30;
+        };
+      };
+    };
     retryPolicy = types.submodule {
       options = {
         maxRetries = mkOption {
@@ -65,6 +77,10 @@
       };
     };
     checkDefinitionCommon = {
+      alertPolicy = mkOption {
+        type = alertPolicy;
+        default = { checkInterval = 300; recheckInterval = 30; };
+      };
       retryPolicy = mkOption {
         type = retryPolicy;
         default = { maxRetries = 3; initial = 1.0; multiplier = 1.1; };

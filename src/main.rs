@@ -1,16 +1,20 @@
-use report::run_report;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Display};
 use std::fs;
 use std::io::{stdin, Read};
+use std::rc::Rc;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
+use alert::run_alerts;
 use async_trait::async_trait;
 use clap::Parser;
 use simple_eyre::eyre::{Result, WrapErr};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::time::timeout as tokio_timeout;
 
+use report::run_report;
+
+mod alert;
 mod config;
 mod dns;
 mod http;
@@ -27,9 +31,15 @@ pub trait Checker {
 }
 
 enum CheckStatus {
+    // Currently Running
     Running,
-    Waiting,
+    // Waiting for Retry
+    Retrying,
+    // Waiting to Run
+    Waiting(Duration, String),
+    // Check succeeded
     Succeeded,
+    // Check failed
     Failed,
 }
 
@@ -37,7 +47,8 @@ impl Display for CheckStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             CheckStatus::Running => write!(f, "Running"),
-            CheckStatus::Waiting => write!(f, "Waiting after failure"),
+            CheckStatus::Retrying => write!(f, "Waiting to retry"),
+            CheckStatus::Waiting(secs, waiting_for) => write!(f, "Waiting {:?} for {}", secs, waiting_for),
             CheckStatus::Succeeded => write!(f, "Succeeded"),
             CheckStatus::Failed => write!(f, "Failed:"),
         }
@@ -94,15 +105,17 @@ impl CheckResult {
     }
 }
 
+#[derive(Clone)]
 pub struct RunnableCheck {
-    checker: Box<dyn Checker>,
-    policy: retry::Policy,
+    alert_policy: alert::Policy,
+    checker: Rc<dyn Checker>,
+    retry_policy: retry::Policy,
     timeout: Duration,
     updates: UpdateChan,
 }
 
 async fn run_check(check: RunnableCheck) -> CheckResult {
-    let mut retrier = retry::Retrier::new(check.policy.clone());
+    let mut retrier = retry::Retrier::new(check.retry_policy.clone());
 
     loop {
         check.updates.send(CheckStatus::Running, None);
@@ -116,7 +129,7 @@ async fn run_check(check: RunnableCheck) -> CheckResult {
                 return CheckResult::Success;
             }
             Err(err) | Ok(Err(err)) => {
-                check.updates.send(CheckStatus::Waiting, err.to_string());
+                check.updates.send(CheckStatus::Retrying, err.to_string());
             }
         }
 
@@ -135,6 +148,9 @@ struct Args {
     select: Option<String>,
     /// The configuration file containing check definitions
     config_file: String,
+    /// Enable alerting mode
+    #[clap(long)]
+    alert: bool,
 }
 
 fn main() -> Result<()> {
@@ -172,8 +188,9 @@ fn main() -> Result<()> {
         check_registry.insert(id, checker.name());
 
         let runnable = RunnableCheck {
+            alert_policy: check_def.alert_policy,
             checker,
-            policy: check_def.retry_policy,
+            retry_policy: check_def.retry_policy,
             timeout: Duration::from_secs_f64(check_def.check_timeout),
             updates: UpdateChan::new(id, tx.clone()),
         };
@@ -183,7 +200,11 @@ fn main() -> Result<()> {
 
     drop(tx);
 
-    run_report(checks, check_registry, rx)?;
+    if args.alert {
+        run_alerts(checks, check_registry, rx)?;
+    } else {
+        run_report(checks, check_registry, rx)?;
+    }
 
     Ok(())
 }
