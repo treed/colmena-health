@@ -139,7 +139,7 @@ async fn run_check(check: RunnableCheck) -> CheckResult {
                 return CheckResult::Success;
             }
             Err(err) | Ok(Err(err)) => {
-                check.updates.send(CheckStatus::Retrying, err.to_string());
+                check.updates.send(CheckStatus::Retrying, format!("{:#}", err));
             }
         }
 
