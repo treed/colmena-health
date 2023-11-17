@@ -7,7 +7,17 @@ use serde_with::{serde_as, DurationSeconds};
 use simple_eyre::eyre::Result;
 use tokio::{sync::mpsc::UnboundedReceiver, time::sleep};
 
-use crate::{run_check, CheckInfo, CheckStatus, CheckUpdate, RunnableCheck};
+use crate::{alertmanager, run_check, CheckInfo, CheckStatus, CheckUpdate, RunnableCheck};
+
+#[serde_as]
+#[derive(Clone, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Config {
+    #[serde(rename = "baseURL")]
+    pub base_url: String,
+    #[serde_as(as = "DurationSeconds<f64>")]
+    pub realert_interval: Duration,
+}
 
 #[serde_as]
 #[derive(Clone, Deserialize, Debug)]
@@ -63,6 +73,7 @@ pub fn run_alerts(
     checks: Vec<RunnableCheck>,
     registry: HashMap<usize, CheckInfo>,
     rx: UnboundedReceiver<CheckUpdate>,
+    alert_config: Option<Config>,
 ) -> Result<()> {
     let checks: FuturesUnordered<_> = checks.into_iter().map(run_check_for_alerts).collect();
 
@@ -72,7 +83,11 @@ pub fn run_alerts(
         .worker_threads(4)
         .build()?;
 
-    let printer = rt.spawn(report_alerts(registry, rx));
+    let printer = if let Some(cfg) = alert_config {
+        rt.spawn(alertmanager::AlertManagerClient::new(cfg.base_url, cfg.realert_interval, registry, rx)?.run())
+    } else {
+        rt.spawn(report_alerts(registry, rx))
+    };
 
     rt.block_on(checks.count());
 

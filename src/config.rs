@@ -1,16 +1,20 @@
+use std::time::Duration;
 use std::{collections::HashMap, rc::Rc};
 
 use serde::Deserialize;
+use serde_with::{serde_as, DurationSeconds};
 
 use simple_eyre::eyre::Result;
 
 use crate::{alert, dns, http, retry, ssh, Checker as CheckerTrait};
 
+#[serde_as]
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckDefinition {
     pub retry_policy: retry::Policy,
-    pub check_timeout: f64,
+    #[serde_as(as = "DurationSeconds<f64>")]
+    pub check_timeout: Duration,
     pub labels: HashMap<String, String>,
     pub annotations: HashMap<String, String>,
     pub alert_policy: alert::Policy,
@@ -39,5 +43,6 @@ impl CheckConfig {
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
+    pub alerting: Option<alert::Config>,
     pub checks: Vec<CheckDefinition>,
 }

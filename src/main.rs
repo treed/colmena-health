@@ -15,6 +15,7 @@ use tokio::time::timeout as tokio_timeout;
 use report::run_report;
 
 mod alert;
+mod alertmanager;
 mod config;
 mod dns;
 mod http;
@@ -205,7 +206,7 @@ fn main() -> Result<()> {
             alert_policy: check_def.alert_policy,
             checker,
             retry_policy: check_def.retry_policy,
-            timeout: Duration::from_secs_f64(check_def.check_timeout),
+            timeout: check_def.check_timeout,
             updates: UpdateChan::new(id, tx.clone()),
         };
 
@@ -215,7 +216,7 @@ fn main() -> Result<()> {
     drop(tx);
 
     if args.alert {
-        run_alerts(checks, check_registry, rx)?;
+        run_alerts(checks, check_registry, rx, config.alerting)?;
     } else {
         run_report(checks, check_registry, rx)?;
     }
