@@ -51,11 +51,11 @@
     alertPolicy = types.submodule {
       options = {
         checkInterval = mkOption {
-          type = types.float;
+          type = types.int;
           default = 300;
         };
         recheckInterval = mkOption {
-          type = types.float;
+          type = types.int;
           default = 30;
         };
       };
@@ -86,7 +86,7 @@
         default = { maxRetries = 3; initial = 1.0; multiplier = 1.1; };
       };
       checkTimeout = mkOption {
-        type = types.float;
+        type = types.int;
         default = 10;
       };
       labels = mkOption {
