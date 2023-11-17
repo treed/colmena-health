@@ -122,6 +122,10 @@
               url = mkOption {
                 type = types.str;
               };
+              insecureIgnoreSSLCert = mkOption {
+                type = types.bool;
+                default = false;
+              };
             };
           }
           // checkDefinitionCommon;

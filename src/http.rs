@@ -5,9 +5,11 @@ use simple_eyre::eyre::{eyre, Result, WrapErr};
 use crate::{CheckStatus, Checker as CheckerTrait, UpdateChan};
 
 #[derive(Clone, Default, Deserialize, Debug)]
-
 pub struct Config {
     url: String,
+    #[serde(rename = "insecureIgnoreSSLCert")]
+    #[serde(default)]
+    insecure_ignore_ssl_cert: bool,
     // TODO expected status codes
 }
 
@@ -20,6 +22,7 @@ pub struct Checker {
 impl Checker {
     pub fn new(id: usize, config: Config) -> Result<Self> {
         let client = reqwest::ClientBuilder::new()
+            .danger_accept_invalid_certs(config.insecure_ignore_ssl_cert)
             .build()
             .wrap_err("Unable to construct http client")?;
 
