@@ -7,7 +7,7 @@ use serde_with::{serde_as, DurationSeconds};
 use simple_eyre::eyre::Result;
 use tokio::{sync::mpsc::UnboundedReceiver, time::sleep};
 
-use crate::{run_check, CheckStatus, CheckUpdate, RunnableCheck};
+use crate::{run_check, CheckInfo, CheckStatus, CheckUpdate, RunnableCheck};
 
 #[serde_as]
 #[derive(Clone, Deserialize, Debug)]
@@ -43,11 +43,11 @@ pub async fn run_check_for_alerts(check: RunnableCheck) {
     }
 }
 
-async fn report_alerts(registry: HashMap<usize, String>, mut updates: UnboundedReceiver<CheckUpdate>) {
+async fn report_alerts(registry: HashMap<usize, CheckInfo>, mut updates: UnboundedReceiver<CheckUpdate>) {
     let unknown = "unknown check".to_owned();
 
     while let Some(update) = updates.recv().await {
-        let name = registry.get(&update.id).unwrap_or(&unknown);
+        let name = registry.get(&update.id).map(|info| &info.name).unwrap_or(&unknown);
 
         println!("{}: {}", name, update.status);
 
@@ -61,7 +61,7 @@ async fn report_alerts(registry: HashMap<usize, String>, mut updates: UnboundedR
 
 pub fn run_alerts(
     checks: Vec<RunnableCheck>,
-    registry: HashMap<usize, String>,
+    registry: HashMap<usize, CheckInfo>,
     rx: UnboundedReceiver<CheckUpdate>,
 ) -> Result<()> {
     let checks: FuturesUnordered<_> = checks.into_iter().map(run_check_for_alerts).collect();

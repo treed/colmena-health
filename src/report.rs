@@ -5,13 +5,13 @@ use futures::StreamExt;
 use simple_eyre::eyre::{eyre, Result};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::{run_check, CheckUpdate, RunnableCheck};
+use crate::{run_check, CheckInfo, CheckUpdate, RunnableCheck};
 
-async fn print_verbose(registry: HashMap<usize, String>, mut rx: UnboundedReceiver<CheckUpdate>) {
+async fn print_verbose(registry: HashMap<usize, CheckInfo>, mut rx: UnboundedReceiver<CheckUpdate>) {
     let unknown = "unknown check".to_owned();
 
     while let Some(update) = rx.recv().await {
-        let name = registry.get(&update.id).unwrap_or(&unknown);
+        let name = registry.get(&update.id).map(|info| &info.name).unwrap_or(&unknown);
 
         println!("{}: {}", name, update.status);
 
@@ -25,7 +25,7 @@ async fn print_verbose(registry: HashMap<usize, String>, mut rx: UnboundedReceiv
 
 pub fn run_report(
     checks: Vec<RunnableCheck>,
-    registry: HashMap<usize, String>,
+    registry: HashMap<usize, CheckInfo>,
     rx: UnboundedReceiver<CheckUpdate>,
 ) -> Result<()> {
     let checks: FuturesUnordered<_> = checks.into_iter().map(run_check).collect();

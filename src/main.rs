@@ -55,6 +55,13 @@ impl Display for CheckStatus {
     }
 }
 
+#[derive(Clone)]
+pub struct CheckInfo {
+    name: String,
+    labels: HashMap<String, String>,
+    annotations: HashMap<String, String>,
+}
+
 pub struct CheckUpdate {
     id: usize,
     status: CheckStatus,
@@ -185,7 +192,14 @@ fn main() -> Result<()> {
         }
 
         let checker = check_def.config.clone().into_check(id)?;
-        check_registry.insert(id, checker.name());
+        check_registry.insert(
+            id,
+            CheckInfo {
+                name: checker.name(),
+                labels: check_def.labels.clone(),
+                annotations: check_def.annotations.clone(),
+            },
+        );
 
         let runnable = RunnableCheck {
             alert_policy: check_def.alert_policy,
