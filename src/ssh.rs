@@ -53,10 +53,15 @@ impl CheckerTrait for Checker {
         let output = ssh_cmd.output().await.wrap_err("Failed to get output from command")?;
 
         let mut log = String::new();
-        log.push_str("Stdout:\n");
-        log.push_str(&String::from_utf8_lossy(&output.stdout));
-        log.push_str("Stderr:\n");
-        log.push_str(&String::from_utf8_lossy(&output.stderr));
+        if output.stdout.is_empty() || output.stderr.is_empty() {
+            log.push_str(&String::from_utf8_lossy(&output.stdout));
+            log.push_str(&String::from_utf8_lossy(&output.stderr));
+        } else {
+            log.push_str("Stdout:\n");
+            log.push_str(&String::from_utf8_lossy(&output.stdout));
+            log.push_str("Stderr:\n");
+            log.push_str(&String::from_utf8_lossy(&output.stderr));
+        }
 
         if !output.status.success() {
             let code = match output.status.code() {

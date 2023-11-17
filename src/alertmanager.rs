@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use simple_eyre::eyre::{Result, WrapErr};
 use time::OffsetDateTime;
@@ -59,25 +60,32 @@ impl AlertManagerClient {
                 // The await doesn't really work with entry or_insert
                 #[allow(clippy::map_entry)]
                 if !self.active_alerts.contains_key(&update.id) {
-                    // TODO report this error
-                    let info = self.registry.get(&update.id).unwrap();
-                    let alert = PostableAlert {
-                        starts_at: Some(time::OffsetDateTime::now_utc()),
-                        ends_at: None,
-                        labels: info.labels.clone(),
-                        annotations: info.annotations.clone(),
-                        generator_url: None,
-                    };
+                    if let Some(info) = self.registry.get(&update.id) {
+                        let alert = PostableAlert {
+                            starts_at: Some(time::OffsetDateTime::now_utc()),
+                            ends_at: None,
+                            labels: info.labels.clone(),
+                            annotations: info.annotations.clone(),
+                            generator_url: None,
+                        };
 
-                    self.active_alerts.insert(update.id, alert);
-                    self.send_alerts().await;
+                        info!("Check failed - {}", info.name);
+                        self.active_alerts.insert(update.id, alert);
+                        self.send_alerts().await;
+                    } else {
+                        error!(
+                            "Tried to send an alert for id {}, which was not in the registry; skipping transmission",
+                            update.id
+                        );
+                    }
                 }
             }
             CheckStatus::Succeeded => {
                 if let Some(alert) = self.active_alerts.get_mut(&update.id) {
                     alert.ends_at = Some(time::OffsetDateTime::now_utc());
-                    self.send_alerts().await;
+                    info!("Check passing again: {:?}", alert.labels);
 
+                    self.send_alerts().await;
                     self.active_alerts.remove(&update.id);
                 }
             }
@@ -87,7 +95,9 @@ impl AlertManagerClient {
 
     async fn send_alerts(&self) {
         let alerts: Vec<&PostableAlert> = self.active_alerts.values().collect();
-        self.client.post(&self.url).json(&alerts).send().await.unwrap(); // TODO report this error
+        if let Err(e) = self.client.post(&self.url).json(&alerts).send().await {
+            error!("Failure sending alerts: {}", e);
+        }
     }
 
     pub async fn run(mut self) {

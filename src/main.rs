@@ -8,6 +8,7 @@ use std::time::Duration;
 use alert::run_alerts;
 use async_trait::async_trait;
 use clap::Parser;
+use log::{debug, error};
 use simple_eyre::eyre::{Result, WrapErr};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::time::timeout as tokio_timeout;
@@ -93,7 +94,7 @@ impl UpdateChan {
             })
             .is_err()
         {
-            // TODO handle this error; I guess print to stderr?
+            error!("Unable to send CheckUpdate for ID {}", self.id);
         }
     }
 }
@@ -124,6 +125,7 @@ pub struct RunnableCheck {
 
 async fn run_check(check: RunnableCheck) -> CheckResult {
     let mut retrier = retry::Retrier::new(check.retry_policy.clone());
+    debug!("Running check - {}", check.checker.name());
 
     loop {
         check.updates.send(CheckStatus::Running, None);
@@ -163,6 +165,8 @@ struct Args {
 
 fn main() -> Result<()> {
     simple_eyre::install()?;
+
+    std_logger::Config::logfmt().init();
 
     let args = Args::parse();
 
@@ -216,7 +220,9 @@ fn main() -> Result<()> {
     drop(tx);
 
     if args.alert {
-        run_alerts(checks, check_registry, rx, config.alerting)?;
+        if let Some(alert_cfg) = config.alerting {
+            run_alerts(checks, check_registry, rx, alert_cfg)?;
+        }
     } else {
         run_report(checks, check_registry, rx)?;
     }

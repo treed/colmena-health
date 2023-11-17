@@ -53,27 +53,11 @@ pub async fn run_check_for_alerts(check: RunnableCheck) {
     }
 }
 
-async fn report_alerts(registry: HashMap<usize, CheckInfo>, mut updates: UnboundedReceiver<CheckUpdate>) {
-    let unknown = "unknown check".to_owned();
-
-    while let Some(update) = updates.recv().await {
-        let name = registry.get(&update.id).map(|info| &info.name).unwrap_or(&unknown);
-
-        println!("{}: {}", name, update.status);
-
-        if let Some(msg) = update.msg {
-            for line in msg.lines() {
-                println!("    {}", line);
-            }
-        }
-    }
-}
-
 pub fn run_alerts(
     checks: Vec<RunnableCheck>,
     registry: HashMap<usize, CheckInfo>,
     rx: UnboundedReceiver<CheckUpdate>,
-    alert_config: Option<Config>,
+    cfg: Config,
 ) -> Result<()> {
     let checks: FuturesUnordered<_> = checks.into_iter().map(run_check_for_alerts).collect();
 
@@ -83,11 +67,8 @@ pub fn run_alerts(
         .worker_threads(4)
         .build()?;
 
-    let printer = if let Some(cfg) = alert_config {
-        rt.spawn(alertmanager::AlertManagerClient::new(cfg.base_url, cfg.realert_interval, registry, rx)?.run())
-    } else {
-        rt.spawn(report_alerts(registry, rx))
-    };
+    let printer =
+        rt.spawn(alertmanager::AlertManagerClient::new(cfg.base_url, cfg.realert_interval, registry, rx)?.run());
 
     rt.block_on(checks.count());
 
