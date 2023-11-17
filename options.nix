@@ -93,6 +93,10 @@
         type = types.attrs;
         default = {};
       };
+      annotations = mkOption {
+        type = types.attrs;
+        default = {};
+      };
     };
 
     checkDefinition = oneOfTagged {
