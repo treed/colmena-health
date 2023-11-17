@@ -9,7 +9,7 @@ use crate::{CheckStatus, Checker as CheckerTrait, UpdateChan};
 pub struct Config {
     command: String,
     hostname: String,
-    user: Option<String>,
+    username: Option<String>,
 }
 
 pub struct Checker {
@@ -42,8 +42,8 @@ impl CheckerTrait for Checker {
 
         ssh.arg(self.config.hostname.clone());
 
-        if let Some(ref user) = self.config.user {
-            ssh.arg(format!("-l{}", user));
+        if let Some(ref username) = self.config.username {
+            ssh.arg(format!("-l{}", username));
         }
 
         ssh.arg(self.config.command.clone());
