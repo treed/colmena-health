@@ -3,20 +3,19 @@ use std::{collections::HashMap, str::FromStr};
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_till1, take_while},
-    character::complete::{alpha1, alphanumeric0},
+    character::complete::alphanumeric1,
     combinator::{map_res, recognize},
-    multi::separated_list1,
+    multi::{many0, separated_list1},
     sequence::{delimited, tuple},
     Finish, IResult,
 };
 
 fn label_name(i: &str) -> IResult<&str, &str> {
-    // This is just the RFC standard for hostnames
+    // This is just the RFC1123 standard for hostnames
     // I figured that it's better to start more restrictive and loosen it later if needed
     recognize(tuple((
-        alpha1,
-        take_while(|c: char| c.is_alphanumeric() || c == '-'),
-        alphanumeric0,
+        alphanumeric1,
+        many0(tuple((take_while(|c: char| c == '-'), alphanumeric1))),
     )))(i)
 }
 
@@ -119,6 +118,8 @@ impl TermMatcher for RegexMatcher {
 
 #[cfg(test)]
 mod tests {
+    use nom::combinator::all_consuming;
+
     use super::*;
 
     fn get_matcher<T>(parsed: Result<(&str, T), nom::Err<nom::error::Error<&str>>>) -> T {
@@ -126,6 +127,18 @@ mod tests {
 
         assert_eq!(rest, "");
         matcher
+    }
+
+    #[test]
+    fn test_label_names() {
+        assert!(label_name("").is_err());
+        assert!(label_name("foo").is_ok());
+        assert!(label_name("foo3").is_ok());
+        assert!(label_name("3foo3").is_ok());
+        assert!(all_consuming(label_name)("foo-").is_err());
+        assert!(label_name("foo-bar").is_ok());
+        assert!(label_name("foo--bar").is_ok());
+        assert!(label_name("-foo").is_err());
     }
 
     #[test]
