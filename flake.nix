@@ -5,10 +5,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crane = {
-      url = "github:ipetkov/crane";
+      url = "github:ipetkov/crane/v0.15.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
     utils.url = "github:numtide/flake-utils";
   };
 
@@ -30,7 +30,7 @@
           lib.attrsets.recursiveUpdate {
             labels.hostname = hostname;
           }
-          checkDef;
+            checkDef;
 
         mkChecks = let
           doMods = mods: hostname: node: checkDef: lib.lists.foldl (x: f: f x) checkDef (builtins.map (m: m hostname node) mods);
@@ -97,6 +97,7 @@
               rustPackages.clippy
               rustc
               rustfmt
+              rusty-man
 
               openssl
             ]
