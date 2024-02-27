@@ -17,6 +17,7 @@ pub struct Config {
     pub base_url: String,
     #[serde_as(as = "DurationSeconds<f64>")]
     pub realert_interval: Duration,
+    pub allow_output_annotation: bool,
 }
 
 #[serde_as]
@@ -67,8 +68,7 @@ pub fn run_alerts(
         .worker_threads(4)
         .build()?;
 
-    let printer =
-        rt.spawn(alertmanager::AlertManagerClient::new(cfg.base_url, cfg.realert_interval, registry, rx)?.run());
+    let printer = rt.spawn(alertmanager::AlertManagerClient::new(cfg, registry, rx)?.run());
 
     rt.block_on(checks.count());
 

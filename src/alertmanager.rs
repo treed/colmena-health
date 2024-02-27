@@ -7,6 +7,7 @@ use time::OffsetDateTime;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::{interval, MissedTickBehavior};
 
+use crate::alert::Config as AlertConfig;
 use crate::{CheckInfo, CheckStatus, CheckUpdate};
 
 #[derive(Clone, Serialize, Debug, Deserialize)]
@@ -28,8 +29,8 @@ pub struct PostableAlert {
 
 pub struct AlertManagerClient {
     active_alerts: HashMap<usize, PostableAlert>,
+    alert_config: AlertConfig,
     client: reqwest::Client,
-    realert_interval: std::time::Duration,
     registry: HashMap<usize, CheckInfo>,
     updates: UnboundedReceiver<CheckUpdate>,
     url: String,
@@ -37,20 +38,20 @@ pub struct AlertManagerClient {
 
 impl AlertManagerClient {
     pub fn new(
-        base_url: String,
-        realert_interval: std::time::Duration,
+        alert_config: AlertConfig,
         registry: HashMap<usize, CheckInfo>,
         updates: UnboundedReceiver<CheckUpdate>,
     ) -> Result<Self> {
         Ok(AlertManagerClient {
             active_alerts: HashMap::new(),
+            // having url out of order avoids a copy
+            url: format!("{}/alerts", &alert_config.base_url),
+            alert_config,
             client: reqwest::ClientBuilder::new()
                 .build()
                 .wrap_err("Unable to construct http client")?,
-            realert_interval,
             registry,
             updates,
-            url: format!("{base_url}/alerts"),
         })
     }
 
@@ -61,13 +62,20 @@ impl AlertManagerClient {
                 #[allow(clippy::map_entry)]
                 if !self.active_alerts.contains_key(&update.id) {
                     if let Some(info) = self.registry.get(&update.id) {
-                        let alert = PostableAlert {
+                        let mut alert = PostableAlert {
                             starts_at: Some(time::OffsetDateTime::now_utc()),
                             ends_at: None,
                             labels: info.labels.clone(),
                             annotations: info.annotations.clone(),
                             generator_url: None,
                         };
+
+                        if self.alert_config.allow_output_annotation {
+                            // Combining these ifs is an unstable feature
+                            if let Some(ref output) = update.msg {
+                                alert.annotations.insert("output".to_owned(), output.clone());
+                            };
+                        }
 
                         info!("Check failed - {}", info.name);
                         self.active_alerts.insert(update.id, alert);
@@ -101,7 +109,7 @@ impl AlertManagerClient {
     }
 
     pub async fn run(mut self) {
-        let mut interval = interval(self.realert_interval);
+        let mut interval = interval(self.alert_config.realert_interval);
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
