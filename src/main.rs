@@ -127,6 +127,7 @@ async fn run_check(check: RunnableCheck) -> CheckResult {
     let mut retrier = retry::Retrier::new(check.retry_policy.clone());
     debug!("Running check - {}", check.checker.name());
 
+    let mut last_output: Option<String> = None;
     loop {
         check.updates.send(CheckStatus::Running, None);
 
@@ -139,14 +140,20 @@ async fn run_check(check: RunnableCheck) -> CheckResult {
                 return CheckResult::Success;
             }
             Err(err) | Ok(Err(err)) => {
-                check.updates.send(CheckStatus::Retrying, format!("{:#}", err));
+                let msg = format!("{:#}", err);
+                check.updates.send(CheckStatus::Retrying, msg.clone());
+                last_output = Some(msg);
             }
         }
 
         if retrier.retry().await.is_none() {
-            check
-                .updates
-                .send(CheckStatus::Failed, "Maximum retries reached".to_owned());
+            check.updates.send(
+                CheckStatus::Failed,
+                format!(
+                    "Maximum retries reached: {}",
+                    last_output.unwrap_or("- no output -".to_owned())
+                ),
+            );
             return CheckResult::Failure;
         }
     }
