@@ -1,8 +1,5 @@
-{
-  pkgs,
-  checker,
-  ...
-}: let
+{ pkgs, checker, ... }:
+let
   # taken from https://github.com/NixOS/nixpkgs/blob/master/nixos/tests/ssh-keys.nix
   snakeOilPrivateKey = pkgs.writeText "privkey.snakeoil" ''
     -----BEGIN EC PRIVATE KEY-----
@@ -23,9 +20,8 @@
     StrictHostKeyChecking no
   '';
 
-  successConfig =
-    pkgs.writeText "success.json"
-    (builtins.toJSON {
+  successConfig = pkgs.writeText "success.json" (
+    builtins.toJSON {
       checks = [
         {
           type = "ssh";
@@ -33,42 +29,45 @@
         }
       ];
       defaults.ssh.hostname = "checked";
-    });
-  failureConfig =
-    pkgs.writeText "failure.json"
-    (builtins.toJSON {
+    }
+  );
+  failureConfig = pkgs.writeText "failure.json" (
+    builtins.toJSON {
       checks = [
         {
           type = "ssh";
           params.command = "false";
-          retryPolicy = {maxRetries = 0;};
+          retryPolicy = {
+            maxRetries = 0;
+          };
         }
       ];
       defaults.ssh.hostname = "checked";
-    });
+    }
+  );
 in
-  pkgs.nixosTest {
-    name = "ssh";
+pkgs.nixosTest {
+  name = "ssh";
 
-    nodes.checker = {...}: {};
-    nodes.checked = {...}: {
+  nodes.checker = { ... }: { };
+  nodes.checked =
+    { ... }:
+    {
       services.openssh.enable = true;
-      users.users.root.openssh.authorizedKeys.keys = [
-        snakeOilPublicKey
-      ];
+      users.users.root.openssh.authorizedKeys.keys = [ snakeOilPublicKey ];
     };
 
-    testScript = ''
-      start_all()
-      checked.wait_for_unit("sshd.service")
+  testScript = ''
+    start_all()
+    checked.wait_for_unit("sshd.service")
 
-      checker.succeed("mkdir ~/.ssh")
-      checker.succeed("cat ${sshClientConfig} > ~/.ssh/config")
-      checker.succeed("cat ${snakeOilPrivateKey} > ~/.ssh/id_ecdsa")
-      checker.succeed("chmod 400 ~/.ssh/id_ecdsa")
-      checker.succeed("ssh -v checked uptime",timeout=30)
+    checker.succeed("mkdir ~/.ssh")
+    checker.succeed("cat ${sshClientConfig} > ~/.ssh/config")
+    checker.succeed("cat ${snakeOilPrivateKey} > ~/.ssh/id_ecdsa")
+    checker.succeed("chmod 400 ~/.ssh/id_ecdsa")
+    checker.succeed("ssh -v checked uptime",timeout=30)
 
-      checker.succeed("${checker} ${successConfig}")
-      checker.fail("${checker} ${failureConfig}")
-    '';
-  }
+    checker.succeed("${checker} ${successConfig}")
+    checker.fail("${checker} ${failureConfig}")
+  '';
+}
