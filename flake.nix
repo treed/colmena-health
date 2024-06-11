@@ -131,11 +131,18 @@
         in
         {
           inherit dns http ssh;
-          all = pkgs.runCommand "all tests" { } ''
-            ${dns}
-            ${http}
-            ${ssh}
-          '';
+          all =
+            pkgs.runCommand "all tests"
+              {
+                buildInputs = [
+                  dns
+                  http
+                  ssh
+                ];
+              }
+              ''
+                touch $out
+              '';
         };
     };
 }

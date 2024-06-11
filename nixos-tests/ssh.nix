@@ -24,8 +24,25 @@ let
     builtins.toJSON {
       checks = [
         {
+          alertPolicy = {
+            checkInterval = 300;
+            recheckInterval = 30;
+          };
+          annotations = { };
+          checkTimeout = 10;
+          labels = {
+            type = "ssh";
+          };
+          params = {
+            hostname = "checked";
+            command = "true";
+          };
+          retryPolicy = {
+            initial = 1.0;
+            maxRetries = 0;
+            multiplier = 1.1;
+          };
           type = "ssh";
-          params.command = "true";
         }
       ];
       defaults.ssh.hostname = "checked";
@@ -35,11 +52,25 @@ let
     builtins.toJSON {
       checks = [
         {
-          type = "ssh";
-          params.command = "false";
-          retryPolicy = {
-            maxRetries = 0;
+          alertPolicy = {
+            checkInterval = 300;
+            recheckInterval = 30;
           };
+          annotations = { };
+          checkTimeout = 10;
+          labels = {
+            type = "ssh";
+          };
+          params = {
+            hostname = "checked";
+            command = "false";
+          };
+          retryPolicy = {
+            initial = 1.0;
+            maxRetries = 0;
+            multiplier = 1.1;
+          };
+          type = "ssh";
         }
       ];
       defaults.ssh.hostname = "checked";

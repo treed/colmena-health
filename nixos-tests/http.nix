@@ -9,8 +9,22 @@ let
     builtins.toJSON {
       checks = [
         {
-          type = "http";
+          alertPolicy = {
+            checkInterval = 300;
+            recheckInterval = 30;
+          };
+          annotations = { };
+          checkTimeout = 10;
+          labels = {
+            type = "http";
+          };
           params.url = "http://localhost/testing/hello.txt";
+          retryPolicy = {
+            initial = 1.0;
+            maxRetries = 0;
+            multiplier = 1.1;
+          };
+          type = "http";
         }
       ];
     }
@@ -19,11 +33,22 @@ let
     builtins.toJSON {
       checks = [
         {
-          type = "http";
-          params.domain = "http://localhost/testing/does-not-exist.txt";
-          retryPolicy = {
-            maxRetries = 0;
+          alertPolicy = {
+            checkInterval = 300;
+            recheckInterval = 30;
           };
+          annotations = { };
+          checkTimeout = 10;
+          labels = {
+            type = "http";
+          };
+          params.url = "http://localhost/testing/does-not-exist.txt";
+          retryPolicy = {
+            initial = 1.0;
+            maxRetries = 0;
+            multiplier = 1.1;
+          };
+          type = "http";
         }
       ];
     }

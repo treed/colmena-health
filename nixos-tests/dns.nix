@@ -12,8 +12,22 @@ let
     builtins.toJSON {
       checks = [
         {
-          type = "dns";
+          alertPolicy = {
+            checkInterval = 300;
+            recheckInterval = 30;
+          };
+          annotations = { };
+          checkTimeout = 10;
+          labels = {
+            type = "dns";
+          };
           params.domain = "test-host1.colmena-health.test";
+          retryPolicy = {
+            initial = 1.0;
+            maxRetries = 0;
+            multiplier = 1.1;
+          };
+          type = "dns";
         }
       ];
     }
@@ -22,11 +36,22 @@ let
     builtins.toJSON {
       checks = [
         {
-          type = "dns";
+          alertPolicy = {
+            checkInterval = 300;
+            recheckInterval = 30;
+          };
+          annotations = { };
+          checkTimeout = 10;
+          labels = {
+            type = "dns";
+          };
           params.domain = "does-not-exist.colmena-health.test";
           retryPolicy = {
+            initial = 1.0;
             maxRetries = 0;
+            multiplier = 1.1;
           };
+          type = "dns";
         }
       ];
     }
