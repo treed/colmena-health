@@ -33,11 +33,11 @@
           check = v: (baseSubmodule.check v) && (v.type == typeTag);
           description = "Submodule[${typeTag}]";
         in
+        types.addCheck (
         baseSubmodule
         // {
-          inherit check;
           inherit description;
-        };
+        }) check;
 
       mapAttrDefs = definitions: attrValues (mapAttrs taggedSubmodule definitions);
 
